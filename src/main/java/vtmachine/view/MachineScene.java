@@ -37,6 +37,8 @@ import javafx.scene.shape.CullFace;
 import javafx.scene.shape.Cylinder;
 import javafx.scene.shape.Shape3D;
 import javafx.scene.shape.Sphere;
+import javafx.scene.text.Font;
+import javafx.scene.text.TextAlignment;
 import javafx.scene.transform.Rotate;
 import javafx.scene.transform.Scale;
 import vtmachine.model.Carrier;
@@ -53,7 +55,7 @@ public final class MachineScene extends StackPane {
     private static final Color RED = Color.web("#f87171");
     private static final Color WHITE = Color.web("#e6edf3");
 
-    private enum VtColor { GREEN, BLUE, PURPLE, RED, WHITE }
+    private enum VtColor { GREEN, BLUE, PURPLE, AMBER, RED, WHITE }
     public enum Quality { AUTO, HIGH, LOW }
     private enum AnchorAlignment { CENTER, RIGHT }
     private record ProjectedLabel(Group anchor, Label label, AnchorAlignment alignment) {}
@@ -65,6 +67,7 @@ public final class MachineScene extends StackPane {
     private final SubScene subScene;
     private final Pane labelOverlay = new Pane();
     private final Canvas terminationCanvas = new Canvas();
+    private final Canvas lessonCanvas = new Canvas(680, 168);
     private final CameraRig camera = new CameraRig();
     private final Label tooltip = new Label();
     private final HBox cameraButtons;
@@ -94,6 +97,7 @@ public final class MachineScene extends StackPane {
     private final List<Label> parkedBadges = new ArrayList<>();
     private final List<Node> externalIoNodes = new ArrayList<>();
     private final List<Label> externalIoLabels = new ArrayList<>();
+    private final List<Box> databasePermitSlots = new ArrayList<>();
     private final List<Sphere> trail = new ArrayList<>();
     private final Map<Node, Vt> pickedVts = new IdentityHashMap<>();
     private final EnumMap<VtColor, PhongMaterial> materials = new EnumMap<>(VtColor.class);
@@ -109,6 +113,9 @@ public final class MachineScene extends StackPane {
     private final PhongMaterial schedulerDim = material(Color.web("#2a2145"));
     private final PhongMaterial stackChunkMaterial = material(Color.web("#c4b5fd"));
     private final PhongMaterial ioLinkMaterial = transparentMaterial(PURPLE, 0.38);
+    private final PhongMaterial resourceLinkMaterial = transparentMaterial(GREEN, 0.55);
+    private final PhongMaterial resourceIdleMaterial = material(Color.web("#26364a"));
+    private final PhongMaterial resourceActiveMaterial = material(GREEN);
 
     private TorusMesh schedulerRing;
     private Box queuePressureBar;
@@ -116,6 +123,7 @@ public final class MachineScene extends StackPane {
     private Label heapLabel;
     private Label queuePressureLabel;
     private Label heroLabel;
+    private Label databasePoolLabel;
     private long heroId = -1;
     private Vt followedVt;
     private Vt pressedVt;
@@ -149,6 +157,9 @@ public final class MachineScene extends StackPane {
         terminationCanvas.setMouseTransparent(true);
         terminationCanvas.widthProperty().bind(widthProperty());
         terminationCanvas.heightProperty().bind(heightProperty());
+        lessonCanvas.setMouseTransparent(true);
+        lessonCanvas.setAccessibleRole(AccessibleRole.TEXT);
+        lessonCanvas.setVisible(false);
         tooltip.getStyleClass().add("vt-tooltip");
         tooltip.setManaged(false);
         tooltip.setVisible(false);
@@ -177,7 +188,7 @@ public final class MachineScene extends StackPane {
         diagnostics.setMouseTransparent(true);
 
         getChildren().addAll(subScene, terminationCanvas, labelOverlay, cameraButtons, shortcut,
-                diagnostics, comparisonOverlay, followOverlay);
+                diagnostics, comparisonOverlay, lessonCanvas, followOverlay);
         StackPane.setAlignment(cameraButtons, Pos.TOP_RIGHT);
         StackPane.setMargin(cameraButtons, new Insets(14, 16, 0, 0));
         StackPane.setAlignment(shortcut, Pos.BOTTOM_RIGHT);
@@ -186,6 +197,8 @@ public final class MachineScene extends StackPane {
         StackPane.setMargin(diagnostics, new Insets(16, 0, 0, 16));
         StackPane.setAlignment(comparisonOverlay, Pos.TOP_CENTER);
         StackPane.setMargin(comparisonOverlay, new Insets(14, 0, 0, 0));
+        StackPane.setAlignment(lessonCanvas, Pos.TOP_CENTER);
+        StackPane.setMargin(lessonCanvas, new Insets(56, 0, 0, 0));
         StackPane.setAlignment(followOverlay, Pos.TOP_LEFT);
         StackPane.setMargin(followOverlay, new Insets(54, 0, 0, 16));
 
@@ -254,11 +267,13 @@ public final class MachineScene extends StackPane {
         materials.put(VtColor.GREEN, material(GREEN));
         materials.put(VtColor.BLUE, material(BLUE));
         materials.put(VtColor.PURPLE, material(PURPLE));
+        materials.put(VtColor.AMBER, material(AMBER));
         materials.put(VtColor.RED, material(RED));
         materials.put(VtColor.WHITE, material(WHITE));
         glowMaterials.put(VtColor.GREEN, glowMaterial(GREEN));
         glowMaterials.put(VtColor.BLUE, glowMaterial(BLUE));
         glowMaterials.put(VtColor.PURPLE, glowMaterial(PURPLE));
+        glowMaterials.put(VtColor.AMBER, glowMaterial(AMBER));
         glowMaterials.put(VtColor.RED, glowMaterial(RED));
         glowMaterials.put(VtColor.WHITE, glowMaterial(WHITE));
 
@@ -400,6 +415,21 @@ public final class MachineScene extends StackPane {
         }
         externalIoLabels.add(addProjectedLabel("EXTERNAL I/O", "purple",
                 160, 103, 0, AnchorAlignment.CENTER));
+
+        for (int permit = 0; permit < Sim.DATABASE_PERMITS; permit++) {
+            Box slot = new Box(6.5, 3.0, 6.5);
+            slot.setTranslateX(132 + permit * 9);
+            slot.setTranslateY(69);
+            slot.setTranslateZ(53);
+            slot.setMaterial(resourceIdleMaterial);
+            slot.setCullFace(CullFace.NONE);
+            slot.setVisible(false);
+            databasePermitSlots.add(slot);
+            world.getChildren().add(slot);
+        }
+        databasePoolLabel = addProjectedLabel("DB CONNECTION POOL · 0/3", "green",
+                141, 61, 53, AnchorAlignment.CENTER);
+        databasePoolLabel.setVisible(false);
     }
 
     private void buildGrid() {
@@ -670,6 +700,8 @@ public final class MachineScene extends StackPane {
         syncTerminationEffects();
         syncFollowOverlay();
         syncComparisonOverlay();
+        syncResourcePool();
+        drawLessonOverlay();
         projectLabels();
     }
 
@@ -713,7 +745,8 @@ public final class MachineScene extends StackPane {
                 : waiting + " READY";
         queuePressureLabel.setText("RUN QUEUE · " + pressure);
         queuePressureLabel.setVisible(waiting > 0);
-        externalIoVisible = sim.freeRun() || sim.chapter() == 2 || sim.chapter() == 3 || sim.chapter() == 5;
+        externalIoVisible = sim.freeRun() || sim.chapter() == 2 || sim.chapter() == 3
+                || sim.chapter() == 5 || sim.chapter() == 6 || sim.chapter() == 7 || sim.chapter() == 9;
         heapLabel.setVisible(externalIoVisible);
         for (Node node : externalIoNodes) node.setVisible(externalIoVisible);
         for (Label label : externalIoLabels) label.setVisible(externalIoVisible);
@@ -778,6 +811,8 @@ public final class MachineScene extends StackPane {
             ioLink.setVisible(connected);
             ioSignal.setVisible(connected);
             if (connected) {
+                ioLink.setMaterial(vt.resourcePermit() ? resourceLinkMaterial : ioLinkMaterial);
+                ioSignal.setMaterial(materials.get(vt.resourcePermit() ? VtColor.GREEN : VtColor.PURPLE));
                 setCylinderBetween(ioLink, vt.pos().x, vt.pos().y, vt.pos().z,
                         endpoint.x, endpoint.y, endpoint.z);
                 ioLink.setOpacity(0.22 + 0.20 * (0.5 + 0.5 * Math.sin(sim.time() * 5 + vt.id())));
@@ -803,6 +838,13 @@ public final class MachineScene extends StackPane {
     }
 
     private VtColor colorFor(Vt vt) {
+        if (vt.state() == Sim.VtState.DONE || vt.state() == Sim.VtState.DEAD) {
+            return switch (vt.outcome()) {
+                case FAILED -> VtColor.RED;
+                case CANCELLED -> VtColor.AMBER;
+                default -> VtColor.WHITE;
+            };
+        }
         return switch (vt.state()) {
             case TO_QUEUE, QUEUED -> VtColor.GREEN;
             case MOUNTING, RUNNING -> vt.carrier() != null && vt.carrier().pinned()
@@ -900,7 +942,13 @@ public final class MachineScene extends StackPane {
             double alpha = Math.pow(1 - progress, 1.3);
             double radius = 3 + progress * 25;
             double size = 0.8 + (1 - progress) * 2.2;
-            graphics.setFill(Color.web("#e6edf3", alpha));
+            Color sparkColor = switch (vt.outcome()) {
+                case FAILED -> RED;
+                case CANCELLED -> AMBER;
+                default -> WHITE;
+            };
+            graphics.setFill(new Color(sparkColor.getRed(), sparkColor.getGreen(),
+                    sparkColor.getBlue(), alpha));
             for (int spark = 0; spark < 10; spark++) {
                 double angle = vt.id() * 0.73 + spark * Math.PI * 2 / 10;
                 double stagger = 0.45 + (spark % 4) * 0.18;
@@ -935,8 +983,10 @@ public final class MachineScene extends StackPane {
             case PARKED -> "Stack chunks stored in heap · waiting on "
                     + (vt.ioDevice() == null ? "external I/O" : vt.ioDevice().display())
                     + (vt.live() ? "" : " · " + String.format(Locale.ROOT, "%.1fs left", Math.max(0, vt.io())));
-            case TERMINATED -> vt.state() == Sim.VtState.DONE
-                    ? "Completed · carrier released · dissolving" : "Completed · dissolved";
+            case TERMINATED -> (vt.outcome() == Sim.Outcome.FAILED ? "Failed"
+                    : vt.outcome() == Sim.Outcome.CANCELLED ? "Cancelled by parent scope" : "Completed")
+                    + (vt.state() == Sim.VtState.DONE
+                            ? " · carrier released · dissolving" : " · dissolved");
         };
         followStatus.setText(vt.lifecyclePhase().display() + " · " + detail);
         followOverlay.setAccessibleText(followTitle.getText() + ". " + followStatus.getText());
@@ -957,6 +1007,203 @@ public final class MachineScene extends StackPane {
                 + " stack" + (sim.stats().parked() == 1 ? "" : "s") + " in heap · " + waiting + " queued");
         comparisonPinValue.setText("carrier retained\n" + pinned
                 + " lane" + (pinned == 1 ? "" : "s") + " blocked · " + waiting + " queued");
+    }
+
+    private void syncResourcePool() {
+        boolean visible = sim.scenario() == Sim.Scenario.RESOURCE_POOL;
+        Sim.ResourcePoolStats pool = sim.resourcePoolStats();
+        for (int i = 0; i < databasePermitSlots.size(); i++) {
+            Box slot = databasePermitSlots.get(i);
+            slot.setVisible(visible && i < pool.capacity());
+            slot.setMaterial(i < pool.inUse() ? resourceActiveMaterial : resourceIdleMaterial);
+            slot.setScaleY(i < pool.inUse() ? 1.0 + 0.12 * Math.sin(sim.time() * 7 + i) : 1.0);
+        }
+        databasePoolLabel.setVisible(visible);
+        databasePoolLabel.setText("DB CONNECTION POOL · " + pool.inUse() + "/" + pool.capacity()
+                + " IN USE · " + pool.waiting() + " WAITING");
+    }
+
+    private void drawLessonOverlay() {
+        Sim.Scenario scenario = sim.scenario();
+        lessonCanvas.setVisible(scenario != Sim.Scenario.NONE);
+        if (scenario == Sim.Scenario.NONE) return;
+        GraphicsContext graphics = lessonCanvas.getGraphicsContext2D();
+        double width = lessonCanvas.getWidth();
+        double height = lessonCanvas.getHeight();
+        graphics.clearRect(0, 0, width, height);
+        graphics.setFill(Color.web("#08111d", 0.94));
+        graphics.fillRoundRect(0, 0, width, height, 18, 18);
+        graphics.setStroke(Color.web("#26364a", 0.95));
+        graphics.setLineWidth(1.2);
+        graphics.strokeRoundRect(0.6, 0.6, width - 1.2, height - 1.2, 18, 18);
+        switch (scenario) {
+            case PLATFORM_COMPARISON -> drawPlatformComparison(graphics);
+            case RESOURCE_POOL -> drawResourceLimit(graphics);
+            case CPU_BOUND -> drawCpuPlateau(graphics);
+            case STRUCTURED -> drawStructuredScopes(graphics);
+            case NONE -> { }
+        }
+    }
+
+    private void drawPlatformComparison(GraphicsContext graphics) {
+        int tasks = sim.scenarioSubmitted();
+        lessonText(graphics, "SAME BLOCKING I/O WORKLOAD · " + tasks + " TASKS", 18, 22, WHITE, 11, true);
+        graphics.setStroke(Color.web("#26364a"));
+        graphics.strokeLine(340, 34, 340, 151);
+
+        lessonText(graphics, "PLATFORM THREAD PER TASK", 18, 46, AMBER, 10, true);
+        drawDotGrid(graphics, Math.min(tasks, 30), 18, 61, 10, 17, AMBER, true);
+        lessonText(graphics, tasks + " PLATFORM THREADS", 18, 130, WHITE, 11, true);
+        lessonText(graphics, tasks + " OS THREADS HELD WHILE BLOCKED", 18, 148, Color.web("#8ea2b8"), 9, false);
+
+        lessonText(graphics, "VIRTUAL THREAD PER TASK", 360, 46, PURPLE, 10, true);
+        drawDotGrid(graphics, Math.min(tasks, 30), 360, 61, 10, 17, PURPLE, false);
+        lessonText(graphics, tasks + " VTs · " + sim.carriers().size() + " CARRIER THREADS", 360, 130, WHITE, 11, true);
+        lessonText(graphics, sim.stats().parked() + " PARKED · CARRIERS REUSED", 360, 148, GREEN, 9, false);
+        lessonCanvas.setAccessibleText("Platform versus virtual threads. The same " + tasks
+                + " blocking tasks use " + tasks + " platform OS threads, or " + sim.carriers().size()
+                + " virtual-thread carriers with " + sim.stats().parked() + " tasks currently parked.");
+    }
+
+    private void drawResourceLimit(GraphicsContext graphics) {
+        Sim.ResourcePoolStats pool = sim.resourcePoolStats();
+        lessonText(graphics, "DOWNSTREAM BOTTLENECK · DATABASE CONNECTIONS", 18, 22, PURPLE, 11, true);
+        lessonText(graphics, "PARKED WAITERS", 18, 49, Color.web("#b6c6d8"), 9, true);
+        drawDotGrid(graphics, Math.min(pool.waiting(), 20), 18, 64, 10, 16, PURPLE, false);
+        lessonText(graphics, pool.waiting() + " VTs WAIT WITHOUT CARRIERS", 18, 127, WHITE, 10, true);
+
+        graphics.setStroke(Color.web("#53657a"));
+        graphics.setLineWidth(2);
+        graphics.strokeLine(212, 88, 290, 88);
+        graphics.strokeLine(422, 88, 500, 88);
+        lessonText(graphics, "ACQUIRE", 227, 79, Color.web("#8ea2b8"), 8, false);
+        lessonText(graphics, "I/O", 455, 79, Color.web("#8ea2b8"), 8, false);
+
+        lessonText(graphics, "CONNECTION POOL", 292, 49, GREEN, 9, true);
+        for (int permit = 0; permit < pool.capacity(); permit++) {
+            double x = 300 + permit * 39;
+            graphics.setFill(permit < pool.inUse() ? GREEN : Color.web("#26364a"));
+            graphics.fillRoundRect(x, 67, 28, 42, 7, 7);
+            lessonText(graphics, "P" + (permit + 1), x + 7, 93,
+                    permit < pool.inUse() ? Color.web("#07110d") : Color.web("#8ea2b8"), 9, true);
+        }
+        lessonText(graphics, pool.inUse() + "/" + pool.capacity() + " IN USE", 315, 127, WHITE, 10, true);
+
+        graphics.setFill(Color.web("#4f46a5"));
+        graphics.fillOval(527, 62, 92, 22);
+        graphics.fillRect(527, 73, 92, 43);
+        graphics.fillOval(527, 104, 92, 22);
+        graphics.setStroke(PURPLE);
+        graphics.strokeOval(527, 62, 92, 22);
+        graphics.strokeOval(527, 82, 92, 22);
+        graphics.strokeOval(527, 104, 92, 22);
+        lessonText(graphics, "DATABASE", 543, 96, WHITE, 10, true);
+        lessonText(graphics, "LIMIT = " + pool.capacity() + "", 542, 145, AMBER, 10, true);
+        lessonCanvas.setAccessibleText("Database connection pool. " + pool.inUse() + " of "
+                + pool.capacity() + " permits are in use and " + pool.waiting()
+                + " virtual threads are parked waiting for a permit.");
+    }
+
+    private void drawCpuPlateau(GraphicsContext graphics) {
+        int carriers = sim.carriers().size();
+        int load = sim.stats().mounted() + sim.stats().runnable();
+        lessonText(graphics, "CPU-BOUND WORK · PARALLELISM HAS A HARD CEILING", 18, 22, BLUE, 11, true);
+        graphics.setStroke(Color.web("#53657a"));
+        graphics.setLineWidth(1);
+        graphics.strokeLine(42, 130, 344, 130);
+        graphics.strokeLine(42, 48, 42, 130);
+        lessonText(graphics, "THROUGHPUT", 48, 48, Color.web("#8ea2b8"), 8, false);
+        lessonText(graphics, "RUNNABLE VTs →", 252, 146, Color.web("#8ea2b8"), 8, false);
+        graphics.setStroke(BLUE);
+        graphics.setLineWidth(3);
+        graphics.beginPath();
+        graphics.moveTo(48, 124);
+        graphics.quadraticCurveTo(118, 60, 174, 60);
+        graphics.lineTo(332, 60);
+        graphics.stroke();
+        double markerX = 48 + Math.min(284, load * 7.0);
+        double markerY = markerX < 174 ? 124 - (markerX - 48) * 64 / 126 : 60;
+        graphics.setFill(WHITE);
+        graphics.fillOval(markerX - 4, markerY - 4, 8, 8);
+        graphics.setStroke(Color.web("#60a5fa", 0.35));
+        graphics.strokeLine(174, 54, 174, 132);
+        lessonText(graphics, "PLATEAU", 183, 76, BLUE, 9, true);
+
+        lessonText(graphics, carriers + " CARRIERS / CPU LANES", 395, 49, AMBER, 10, true);
+        for (int i = 0; i < carriers; i++) {
+            int column = i % 5;
+            int row = i / 5;
+            double x = 398 + column * 48;
+            double y = 65 + row * 38;
+            graphics.setFill(i < sim.stats().mounted() ? AMBER : Color.web("#26364a"));
+            graphics.fillRoundRect(x, y, 36, 25, 6, 6);
+            lessonText(graphics, "C" + (i + 1), x + 10, y + 17,
+                    i < sim.stats().mounted() ? Color.web("#1c1508") : Color.web("#8ea2b8"), 9, true);
+        }
+        lessonText(graphics, sim.stats().runnable() + " QUEUED · "
+                + Math.round(sim.carrierUtilization() * 100) + "% UTILIZED", 395, 146, GREEN, 10, true);
+        lessonCanvas.setAccessibleText("CPU-bound workload. " + sim.stats().mounted() + " of " + carriers
+                + " carriers are busy and " + sim.stats().runnable()
+                + " tasks are queued. Throughput plateaus at the carrier and core count.");
+    }
+
+    private void drawStructuredScopes(GraphicsContext graphics) {
+        lessonText(graphics, "STRUCTURED CONCURRENCY · FORK → CONTAIN → JOIN", 18, 22, GREEN, 11, true);
+        List<Sim.ScopeStats> scopes = sim.structuredScopes();
+        for (int scopeIndex = 0; scopeIndex < scopes.size(); scopeIndex++) {
+            Sim.ScopeStats scope = scopes.get(scopeIndex);
+            double left = 18 + scopeIndex * 220;
+            Color scopeColor = scope.failed() > 0 ? RED : scope.joined() ? GREEN : BLUE;
+            graphics.setStroke(Color.web("#26364a"));
+            graphics.strokeRoundRect(left, 37, 202, 113, 12, 12);
+            graphics.setFill(Color.web("#0d1826"));
+            graphics.fillRoundRect(left + 1, 38, 200, 111, 12, 12);
+            graphics.setStroke(scopeColor);
+            graphics.strokeLine(left + 101, 69, left + 101, 89);
+            graphics.strokeLine(left + 42, 89, left + 160, 89);
+            lessonText(graphics, scope.name() + " SCOPE", left + 12, 58, scopeColor, 10, true);
+            for (int child = 0; child < scope.total(); child++) {
+                double x = left + 42 + child * 39;
+                graphics.strokeLine(x, 89, x, 99);
+                graphics.setFill(scopeChildColor(scope, child));
+                graphics.fillOval(x - 7, 98, 14, 14);
+            }
+            String state = scope.joined()
+                    ? scope.failed() > 0 ? "JOINED · FAILURE CONTAINED" : "JOINED · SUCCESS"
+                    : "WAITING FOR " + scope.active() + " CHILD" + (scope.active() == 1 ? "" : "REN");
+            lessonText(graphics, state, left + 12, 136, scopeColor, 8, true);
+        }
+        lessonCanvas.setAccessibleText("Structured concurrency with three scopes. " + scopes.stream()
+                .map(scope -> scope.name() + ": " + scope.succeeded() + " succeeded, " + scope.failed()
+                        + " failed, " + scope.cancelled() + " cancelled")
+                .reduce((left, right) -> left + "; " + right).orElse("starting"));
+    }
+
+    private static Color scopeChildColor(Sim.ScopeStats scope, int child) {
+        if (child < scope.succeeded()) return GREEN;
+        if (child < scope.succeeded() + scope.failed()) return RED;
+        if (child < scope.succeeded() + scope.failed() + scope.cancelled()) return AMBER;
+        return BLUE;
+    }
+
+    private static void drawDotGrid(GraphicsContext graphics, int count, double x, double y,
+            int columns, double spacing, Color color, boolean square) {
+        graphics.setFill(color);
+        for (int i = 0; i < count; i++) {
+            double dotX = x + i % columns * spacing;
+            double dotY = y + i / columns * spacing;
+            if (square) graphics.fillRoundRect(dotX, dotY, 9, 9, 2, 2);
+            else graphics.fillOval(dotX, dotY, 9, 9);
+        }
+    }
+
+    private static void lessonText(GraphicsContext graphics, String text, double x, double y,
+            Color color, double size, boolean bold) {
+        graphics.setTextAlign(TextAlignment.LEFT);
+        graphics.setFill(color);
+        graphics.setFont(Font.font("IBM Plex Mono",
+                bold ? javafx.scene.text.FontWeight.SEMI_BOLD : javafx.scene.text.FontWeight.NORMAL, size));
+        graphics.fillText(text, x, y);
     }
 
     private void projectLabels() {
@@ -1050,9 +1297,9 @@ public final class MachineScene extends StackPane {
     }
 
     public void cameraForChapter(int chapter) {
-        camera.toPreset(switch (Math.floorMod(chapter, 6)) {
-            case 0, 5 -> CameraRig.Preset.OVERVIEW;
-            case 2 -> CameraRig.Preset.HEAP;
+        camera.toPreset(switch (Math.floorMod(chapter, Sim.CHAPTER_COUNT)) {
+            case 0, 5, 6, 8, 9 -> CameraRig.Preset.OVERVIEW;
+            case 2, 7 -> CameraRig.Preset.HEAP;
             default -> CameraRig.Preset.CARRIERS;
         });
     }

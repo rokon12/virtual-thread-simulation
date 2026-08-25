@@ -82,9 +82,72 @@ class SimTest {
     void chaptersWrapInBothDirections() {
         Sim sim = new Sim(4, 500, 1.4, 3);
         sim.gotoChapter(-1);
-        assertEquals(5, sim.chapter());
-        sim.gotoChapter(6);
+        assertEquals(9, sim.chapter());
+        sim.gotoChapter(Sim.CHAPTER_COUNT);
         assertEquals(0, sim.chapter());
+    }
+
+    @Test
+    void comparisonRunsTheSameBlockingWorkloadOnAFixedCarrierPool() {
+        Sim sim = new Sim(4, 100, 1.4, 101);
+        advance(sim, 3.1);
+        sim.gotoChapter(6);
+        advance(sim, 2.5);
+
+        assertEquals(Sim.Scenario.PLATFORM_COMPARISON, sim.scenario());
+        assertEquals(32, sim.scenarioSubmitted());
+        assertTrue(sim.vts().stream().allMatch(vt -> vt.profile() == Sim.TaskProfile.IO_BOUND));
+        assertTrue(sim.stats().parked() > 0);
+        assertTrue(sim.stats().mounted() <= sim.carriers().size());
+    }
+
+    @Test
+    void databasePoolCapsPermitsAndParksExcessWaiters() {
+        Sim sim = new Sim(4, 100, 1.4, 202);
+        advance(sim, 3.1);
+        sim.gotoChapter(7);
+        advance(sim, 3.0);
+
+        Sim.ResourcePoolStats pool = sim.resourcePoolStats();
+        assertEquals(3, pool.capacity());
+        assertEquals(3, pool.inUse());
+        assertTrue(pool.waiting() > 0);
+        assertTrue(sim.vts().stream().filter(Vt::resourcePermit)
+                .allMatch(vt -> vt.ioDevice() == Sim.IoDevice.DATABASE));
+        assertTrue(sim.invariantViolations().isEmpty());
+    }
+
+    @Test
+    void cpuBoundChapterSaturatesCarriersButDoesNotCreateParallelism() {
+        Sim sim = new Sim(6, 100, 1.4, 303);
+        advance(sim, 3.1);
+        sim.gotoChapter(8);
+        advance(sim, 2.0);
+
+        assertEquals(Sim.Scenario.CPU_BOUND, sim.scenario());
+        assertEquals(6, sim.stats().mounted());
+        assertTrue(sim.stats().runnable() > 0);
+        assertEquals(0, sim.stats().parked());
+        assertTrue(sim.vts().stream().allMatch(vt -> vt.profile() == Sim.TaskProfile.COMPUTE));
+    }
+
+    @Test
+    void structuredFailureCancelsOnlyItsSiblingScopeAndJoins() {
+        Sim sim = new Sim(4, 100, 1.4, 404);
+        advance(sim, 3.1);
+        sim.gotoChapter(9);
+        advance(sim, 7.0);
+
+        Sim.ScopeStats checkout = sim.structuredScopes().stream()
+                .filter(scope -> scope.name().equals("CHECKOUT"))
+                .findFirst().orElseThrow();
+        assertTrue(checkout.joined());
+        assertEquals(1, checkout.failed());
+        assertTrue(checkout.cancelled() > 0);
+        assertTrue(sim.structuredScopes().stream()
+                .filter(scope -> !scope.name().equals("CHECKOUT"))
+                .allMatch(scope -> scope.failed() == 0 && scope.cancelled() == 0));
+        assertTrue(sim.invariantViolations().isEmpty());
     }
 
     @Test
@@ -181,7 +244,7 @@ class SimTest {
                     case 2 -> sim.forcePin();
                     case 3 -> sim.setSpeed(actions.nextDouble(0.25, 3.0));
                     case 4 -> sim.setFreeRun(actions.nextBoolean());
-                    default -> sim.gotoChapter(actions.nextInt(1, 6));
+                    default -> sim.gotoChapter(actions.nextInt(1, Sim.CHAPTER_COUNT));
                 }
             }
             sim.tick(STEP);

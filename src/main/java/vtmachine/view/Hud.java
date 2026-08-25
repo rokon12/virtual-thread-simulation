@@ -33,10 +33,12 @@ import vtmachine.model.Sim;
 public final class Hud {
     private static final Pattern VT_ID = Pattern.compile("VT-(\\d+)");
     private static final String[] CHAPTER_TITLES = {
-        "BOOT", "MOUNT", "PARK", "RESUME", "PINNED", "SCALE"
+        "BOOT", "MOUNT", "PARK", "RESUME", "PINNED", "SCALE",
+        "PLATFORM vs VT", "POOL LIMIT", "CPU BOUND", "STRUCTURED"
     };
     private static final String[] CHAPTER_COLORS = {
-        "amber", "blue", "purple", "green", "red", "white"
+        "amber", "blue", "purple", "green", "red", "white",
+        "amber", "purple", "blue", "green"
     };
     private static final String[] CHAPTER_TEXT = {
         "Power on. A small set of OS threads lights up on the CPU cores; the JVM starts carrier (platform) threads, and the ForkJoinPool scheduler spins up above them. This small machine is all the OS ever sees.",
@@ -44,7 +46,11 @@ public final class Hud {
         "An I/O-bound VT reaches its randomized wait. Its stack-chunk marker lifts from the carrier into the heap while a pulse travels to the external network, disk, timer, or database endpoint. The carrier is instantly free for another VT.",
         "The external I/O completes. The stored continuation moves back through the run queue and remounts on ANY free carrier — not necessarily the one it left. Watch the stack marker merge into a different slot.",
         "Compare the two paths above the machine: parking moves stack chunks to the heap and releases the carrier; native or foreign-function pinning locks the carrier red and makes runnable work wait. Ordinary synchronized code no longer pins on Java 25.",
-        "The payoff. 500 mixed-duration tasks flood in while the green run-queue pressure bar expands. A fixed set of illustrative carriers drains the queue; I/O parking releases lanes, pinning blocks them, and completed VTs dissolve in place after releasing their carrier."
+        "The payoff. 500 mixed-duration tasks flood in while the green run-queue pressure bar expands. A fixed set of illustrative carriers drains the queue; I/O parking releases lanes, pinning blocks them, and completed VTs dissolve in place after releasing their carrier.",
+        "Run the same blocking I/O workload two ways. A platform-thread-per-task design ties up one costly OS thread per wait; virtual threads park cheaply while a small, fixed carrier pool keeps executing other work.",
+        "Virtual threads remove the thread bottleneck, not downstream limits. Only three tasks may hold a database connection; every other VT parks in the heap without occupying a carrier until a permit becomes available.",
+        "Virtual threads improve blocking concurrency, not CPU parallelism. Compute-only tasks saturate every carrier and the run queue grows, but throughput plateaus at the available carrier/core count.",
+        "Related child VTs live inside parent scopes. Each scope forks four children and joins only after they finish; when one CHECKOUT child fails, its active siblings are cancelled and the failure is contained within that scope."
     };
 
     public record Actions(IntConsumer chapter, Consumer<Boolean> freeRun,
@@ -402,7 +408,7 @@ public final class Hud {
                 + "\nMIX · FAST " + mix.fast() + " · CPU " + mix.compute()
                 + " · I/O " + mix.ioBound());
         int chapter = sim.chapter();
-        chapterNumber.setText("CHAPTER " + (chapter + 1) + "/6");
+        chapterNumber.setText("CHAPTER " + (chapter + 1) + "/" + Sim.CHAPTER_COUNT);
         chapterTitle.setText(chapterTitle(chapter));
         chapterTitle.getStyleClass().removeIf(style -> style.startsWith("text-"));
         chapterTitle.getStyleClass().add("text-" + CHAPTER_COLORS[chapter]);

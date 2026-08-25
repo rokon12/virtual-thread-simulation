@@ -7,6 +7,7 @@ import java.util.Deque;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -24,9 +25,22 @@ public final class Sim {
     public static final int DEFAULT_CARRIERS = 4;
     public static final int DEFAULT_MAX_THREADS = 500;
     public static final double DEFAULT_TASK_RATE = 1.4;
+    public static final int CHAPTER_COUNT = 10;
+    public static final int DATABASE_PERMITS = 3;
 
     public record Stats(int runnable, int mounted, int parked, int completed) {}
     public record ProfileStats(int fast, int compute, int ioBound) {}
+    public record ResourcePoolStats(int capacity, int inUse, int waiting) {}
+    public record ScopeStats(int id, String name, int total, int active,
+            int succeeded, int failed, int cancelled, boolean joined) {}
+
+    public enum Scenario {
+        NONE, PLATFORM_COMPARISON, RESOURCE_POOL, CPU_BOUND, STRUCTURED
+    }
+
+    public enum Outcome {
+        ACTIVE, COMPLETED, FAILED, CANCELLED
+    }
 
     public enum TaskProfile {
         FAST("FAST CPU"), COMPUTE("COMPUTE"), IO_BOUND("I/O BOUND");
@@ -67,12 +81,13 @@ public final class Sim {
 
     /** Messages accepted from the optional real virtual-thread workload. */
     public sealed interface LiveEvent permits LiveSpawned, LiveProgress, LiveParked,
-            LiveResumed, LiveCompleted, LivePinned {}
+            LivePermitAcquired, LiveResumed, LiveCompleted, LivePinned {}
     public record LiveSpawned(long threadId, CompletableFuture<Void> firstMount,
             CompletableFuture<Void> resumeMount, TaskProfile profile,
             double plannedIoSeconds) implements LiveEvent {}
     public record LiveProgress(long threadId, double progress) implements LiveEvent {}
     public record LiveParked(long threadId) implements LiveEvent {}
+    public record LivePermitAcquired(long threadId) implements LiveEvent {}
     public record LiveResumed(long threadId, double ioSeconds) implements LiveEvent {}
     public record LiveCompleted(long threadId) implements LiveEvent {}
     public record LivePinned(long threadId, double durationSeconds, String reason) implements LiveEvent {}
@@ -91,6 +106,8 @@ public final class Sim {
     private final EnumMap<Flash, Double> flashes = new EnumMap<>(Flash.class);
     private final ConcurrentLinkedQueue<LiveEvent> liveEvents = new ConcurrentLinkedQueue<>();
     private final Map<Long, Vt> liveById = new HashMap<>();
+    private final Deque<Vt> permitWaiters = new ArrayDeque<>();
+    private final Map<Integer, ScopeProgress> scopes = new LinkedHashMap<>();
 
     private long nextId;
     private double time;
@@ -110,7 +127,32 @@ public final class Sim {
     private boolean pendingPin;
     private boolean bootAutoAdvanced;
     private boolean liveMode;
+    private Scenario scenario = Scenario.NONE;
+    private int scenarioSubmitted;
+    private int scenarioSpawned;
+    private int permitsInUse;
     private Vt hero;
+
+    private static final class ScopeProgress {
+        final int id;
+        final String name;
+        final int total;
+        int succeeded;
+        int failed;
+        int cancelled;
+
+        ScopeProgress(int id, String name, int total) {
+            this.id = id;
+            this.name = name;
+            this.total = total;
+        }
+
+        int terminal() { return succeeded + failed + cancelled; }
+        ScopeStats snapshot() {
+            return new ScopeStats(id, name, total, Math.max(0, total - terminal()),
+                    succeeded, failed, cancelled, terminal() == total);
+        }
+    }
 
     public Sim() {
         this(DEFAULT_CARRIERS, DEFAULT_MAX_THREADS, DEFAULT_TASK_RATE, System.nanoTime());
@@ -205,7 +247,7 @@ public final class Sim {
         for (int i = 0; i < queue.size(); i++) {
             Vt vt = queue.get(i);
             if (vt.state == VtState.QUEUED && vt.tween == null) {
-                drift(vt.pos, queueSlot(i), k);
+                drift(vt.pos, queueTarget(vt, i), k);
             }
         }
 
@@ -260,6 +302,11 @@ public final class Sim {
             if (vt.live) continue;
 
             vt.work -= dt;
+            if (scenario == Scenario.STRUCTURED && vt.failureCandidate
+                    && vt.work <= vt.work0 * 0.55) {
+                fail(vt, carrier);
+                continue;
+            }
             if (!vt.resumed && vt.profile == TaskProfile.IO_BOUND && vt.work <= vt.ioTriggerWork) {
                 park(vt);
                 continue;
@@ -282,8 +329,10 @@ public final class Sim {
         for (Vt vt : vts) {
             if (vt.state != VtState.PARKED) continue;
             if (vt.live) continue;
+            if (vt.waitingForPermit) continue;
             vt.io -= dt;
             if (vt.io <= 0) {
+                releasePermit(vt);
                 resume(vt);
             }
         }
@@ -304,28 +353,75 @@ public final class Sim {
     }
 
     private void spawn() {
-        TaskProfile profile = randomProfile();
-        double work = switch (profile) {
-            case FAST -> 0.45 + random.nextDouble() * 1.05;
-            case COMPUTE -> 2.2 + random.nextDouble() * 4.8;
-            case IO_BOUND -> 0.8 + random.nextDouble() * 1.8;
-        };
-        double plannedIo = profile == TaskProfile.IO_BOUND ? 1.0 + random.nextDouble() * 7.0 : 0;
+        TaskProfile profile = scenarioProfile();
+        double work = scenarioWork(profile);
+        double plannedIo = profile == TaskProfile.IO_BOUND
+                ? scenario == Scenario.PLATFORM_COMPARISON || scenario == Scenario.RESOURCE_POOL
+                        ? 3.5 + random.nextDouble() * 3.5
+                        : scenario == Scenario.STRUCTURED ? 1.8 + random.nextDouble() * 2.2
+                        : 1.0 + random.nextDouble() * 7.0
+                : 0;
         double ioTrigger = profile == TaskProfile.IO_BOUND
-                ? work * (0.38 + random.nextDouble() * 0.34) : -1;
+                ? work * (scenario == Scenario.PLATFORM_COMPARISON || scenario == Scenario.RESOURCE_POOL
+                        ? 0.80 + random.nextDouble() * 0.10
+                        : 0.38 + random.nextDouble() * 0.34)
+                : -1;
         IoDevice ioDevice = profile == TaskProfile.IO_BOUND
-                ? IoDevice.values()[random.nextInt(IoDevice.values().length)] : null;
+                ? scenario == Scenario.RESOURCE_POOL ? IoDevice.DATABASE
+                        : IoDevice.values()[random.nextInt(IoDevice.values().length)] : null;
         Vt vt = new Vt(nextId++, new Vec3(
                 -130 + random.nextDouble() * 20 - 10,
                 105 + random.nextDouble() * 12,
                 random.nextDouble() * 20 - 10), work, profile, plannedIo, ioTrigger, ioDevice, time);
+        configureScenarioTask(vt);
         if (hero == null) {
             hero = vt;
             vt.hero = true;
         }
-        tween(vt, queueSlot(queue.size()), 0.7, Arrival.QUEUED);
+        tween(vt, queueTarget(vt, queue.size()), 0.7, Arrival.QUEUED);
         queue.add(vt);
         vts.add(vt);
+    }
+
+    private TaskProfile scenarioProfile() {
+        return switch (scenario) {
+            case PLATFORM_COMPARISON, RESOURCE_POOL -> TaskProfile.IO_BOUND;
+            case CPU_BOUND -> TaskProfile.COMPUTE;
+            case STRUCTURED -> switch (scenarioSpawned % 4) {
+                case 0 -> TaskProfile.FAST;
+                case 1, 3 -> TaskProfile.IO_BOUND;
+                default -> TaskProfile.COMPUTE;
+            };
+            case NONE -> randomProfile();
+        };
+    }
+
+    private double scenarioWork(TaskProfile profile) {
+        return switch (scenario) {
+            case PLATFORM_COMPARISON, RESOURCE_POOL -> 0.75 + random.nextDouble() * 0.45;
+            case CPU_BOUND -> 5.0 + random.nextDouble() * 4.0;
+            case STRUCTURED -> switch (profile) {
+                case FAST -> 0.8 + random.nextDouble() * 0.7;
+                case COMPUTE -> 1.8 + random.nextDouble() * 2.0;
+                case IO_BOUND -> 1.0 + random.nextDouble() * 1.1;
+            };
+            case NONE -> switch (profile) {
+                case FAST -> 0.45 + random.nextDouble() * 1.05;
+                case COMPUTE -> 2.2 + random.nextDouble() * 4.8;
+                case IO_BOUND -> 0.8 + random.nextDouble() * 1.8;
+            };
+        };
+    }
+
+    private void configureScenarioTask(Vt vt) {
+        if (scenario == Scenario.STRUCTURED) {
+            int sequence = scenarioSpawned++;
+            vt.scopeId = sequence / 4 + 1;
+            vt.scopeChildIndex = sequence % 4;
+            vt.failureCandidate = sequence == 6;
+        } else {
+            scenarioSpawned++;
+        }
     }
 
     private void drainLiveEvents() {
@@ -347,6 +443,10 @@ public final class Sim {
                 if (vt != null) {
                     double value = Math.max(0, Math.min(1, progress.progress()));
                     vt.work = vt.work0 * (1 - value);
+                    if (scenario == Scenario.STRUCTURED && vt.failureCandidate && value >= 0.45
+                            && vt.outcome == Outcome.ACTIVE && vt.carrier != null) {
+                        fail(vt, vt.carrier);
+                    }
                 }
             } else if (event instanceof LiveParked parked) {
                 Vt vt = liveById.get(parked.threadId());
@@ -354,9 +454,19 @@ public final class Sim {
                     if (vt.carrier != null && vt.carrier.pinned()) vt.liveParkPending = true;
                     else park(vt);
                 }
+            } else if (event instanceof LivePermitAcquired acquired) {
+                Vt vt = liveById.get(acquired.threadId());
+                if (vt != null && scenario == Scenario.RESOURCE_POOL && vt.waitingForPermit) {
+                    permitWaiters.remove(vt);
+                    vt.waitingForPermit = false;
+                    vt.resourcePermit = true;
+                    permitsInUse++;
+                    addLog("VT-" + vt.id + " acquired DB permit " + permitsInUse + "/" + resourceCapacity());
+                }
             } else if (event instanceof LiveResumed resumed) {
                 Vt vt = liveById.get(resumed.threadId());
                 if (vt != null && (vt.state == VtState.PARKED || vt.state == VtState.PARKING)) {
+                    releasePermit(vt);
                     resume(vt, resumed.ioSeconds());
                 }
             } else if (event instanceof LiveCompleted completedEvent) {
@@ -385,14 +495,21 @@ public final class Sim {
             event.resumeMount().completeExceptionally(failure);
             return;
         }
+        TaskProfile profile = scenario == Scenario.PLATFORM_COMPARISON
+                || scenario == Scenario.RESOURCE_POOL ? TaskProfile.IO_BOUND
+                : scenario == Scenario.CPU_BOUND ? TaskProfile.COMPUTE : event.profile();
+        double plannedIo = profile == TaskProfile.IO_BOUND
+                ? Math.max(2.5, event.plannedIoSeconds()) : 0;
         Vt vt = new Vt(event.threadId(), new Vec3(
                 -130 + random.nextDouble() * 20 - 10,
                 105 + random.nextDouble() * 12,
-                random.nextDouble() * 20 - 10), 1.0, event.profile(),
-                event.plannedIoSeconds(), -1,
-                event.profile() == TaskProfile.IO_BOUND
-                        ? IoDevice.values()[random.nextInt(IoDevice.values().length)] : null,
+                random.nextDouble() * 20 - 10), 1.0, profile,
+                plannedIo, -1,
+                profile == TaskProfile.IO_BOUND
+                        ? scenario == Scenario.RESOURCE_POOL ? IoDevice.DATABASE
+                                : IoDevice.values()[random.nextInt(IoDevice.values().length)] : null,
                 time);
+        configureScenarioTask(vt);
         vt.live = true;
         vt.firstMountSignal = event.firstMount();
         vt.resumeMountSignal = event.resumeMount();
@@ -400,7 +517,7 @@ public final class Sim {
             hero = vt;
             vt.hero = true;
         }
-        tween(vt, queueSlot(queue.size()), 0.7, Arrival.QUEUED);
+        tween(vt, queueTarget(vt, queue.size()), 0.7, Arrival.QUEUED);
         queue.add(vt);
         vts.add(vt);
         liveById.put(vt.id, vt);
@@ -434,6 +551,21 @@ public final class Sim {
         if (vt.ioDevice == null) vt.ioDevice = IoDevice.values()[random.nextInt(IoDevice.values().length)];
         vt.io = vt.live ? Double.POSITIVE_INFINITY
                 : vt.plannedIoSeconds > 0 ? vt.plannedIoSeconds : 1.0 + random.nextDouble() * 7.0;
+        if (scenario == Scenario.RESOURCE_POOL && vt.ioDevice == IoDevice.DATABASE) {
+            if (vt.live) {
+                vt.waitingForPermit = true;
+                vt.io = Double.POSITIVE_INFINITY;
+                permitWaiters.addLast(vt);
+            } else if (permitsInUse < resourceCapacity()) {
+                permitsInUse++;
+                vt.resourcePermit = true;
+                addLog("VT-" + vt.id + " acquired DB permit " + permitsInUse + "/" + resourceCapacity());
+            } else {
+                vt.waitingForPermit = true;
+                vt.io = Double.POSITIVE_INFINITY;
+                permitWaiters.addLast(vt);
+            }
+        }
         vt.parkedAt = time;
         int parkedCount = 0;
         for (Vt candidate : vts) {
@@ -443,7 +575,8 @@ public final class Sim {
         }
         tween(vt, heapSlot(parkedCount), 0.85, Arrival.PARKED);
         flash(Flash.PARK);
-        addLog("VT-" + vt.id + " I/O wait · carrier released");
+        addLog("VT-" + vt.id + (vt.waitingForPermit
+                ? " parked · waiting for DB permit" : " I/O wait · carrier released"));
     }
 
     private void resume(Vt vt) {
@@ -460,9 +593,36 @@ public final class Sim {
         vt.resumed = true;
         vt.io = 0;
         queue.addFirst(vt);
-        tween(vt, queueSlot(0), 0.85, Arrival.QUEUED);
+        tween(vt, queueTarget(vt, 0), 0.85, Arrival.QUEUED);
         flash(Flash.RESUME);
         addLog("VT-" + vt.id + " I/O done · runnable");
+    }
+
+    private void releasePermit(Vt vt) {
+        permitWaiters.remove(vt);
+        vt.waitingForPermit = false;
+        if (!vt.resourcePermit) return;
+        vt.resourcePermit = false;
+        permitsInUse = Math.max(0, permitsInUse - 1);
+        if (!vt.live) grantNextPermit();
+    }
+
+    private void grantNextPermit() {
+        while (permitsInUse < resourceCapacity() && !permitWaiters.isEmpty()) {
+            Vt next = permitWaiters.removeFirst();
+            if (next.outcome != Outcome.ACTIVE
+                    || next.state != VtState.PARKED && next.state != VtState.PARKING) continue;
+            next.waitingForPermit = false;
+            next.resourcePermit = true;
+            next.io = next.plannedIoSeconds > 0 ? next.plannedIoSeconds
+                    : 2.5 + random.nextDouble() * 3.0;
+            permitsInUse++;
+            addLog("VT-" + next.id + " acquired DB permit " + permitsInUse + "/" + resourceCapacity());
+        }
+    }
+
+    private int resourceCapacity() {
+        return Math.min(DATABASE_PERMITS, Math.max(1, carriers.size()));
     }
 
     private void pin(Vt vt) {
@@ -477,9 +637,54 @@ public final class Sim {
         carrier.mounted = null;
         vt.carrier = null;
         vt.tween = null;
+        vt.outcome = Outcome.COMPLETED;
         vt.transitionTo(VtState.DONE, time);
         completed++;
+        recordScopeOutcome(vt);
         addLog("VT-" + vt.id + " completed · C" + (carrier.index() + 1) + " free · terminated");
+    }
+
+    private void fail(Vt vt, Carrier carrier) {
+        if (vt.outcome != Outcome.ACTIVE) return;
+        carrier.mounted = null;
+        vt.carrier = null;
+        vt.tween = null;
+        vt.outcome = Outcome.FAILED;
+        vt.transitionTo(VtState.DONE, time);
+        recordScopeOutcome(vt);
+        addLog("VT-" + vt.id + " failed · scope " + vt.scopeId + " cancelling siblings");
+        cancelScope(vt.scopeId, vt);
+    }
+
+    private void cancelScope(int scopeId, Vt failed) {
+        for (Vt sibling : vts) {
+            if (sibling == failed || sibling.scopeId != scopeId || sibling.outcome != Outcome.ACTIVE) continue;
+            if (sibling.carrier != null) sibling.carrier.mounted = null;
+            sibling.carrier = null;
+            queue.remove(sibling);
+            permitWaiters.remove(sibling);
+            releasePermit(sibling);
+            sibling.tween = null;
+            sibling.outcome = Outcome.CANCELLED;
+            sibling.transitionTo(VtState.DONE, time);
+            recordScopeOutcome(sibling);
+        }
+        addLog("scope " + scopeId + " joined exceptionally");
+    }
+
+    private void recordScopeOutcome(Vt vt) {
+        if (vt.scopeId <= 0) return;
+        ScopeProgress scope = scopes.get(vt.scopeId);
+        if (scope == null) return;
+        switch (vt.outcome) {
+            case COMPLETED -> scope.succeeded++;
+            case FAILED -> scope.failed++;
+            case CANCELLED -> scope.cancelled++;
+            case ACTIVE -> { }
+        }
+        if (scope.terminal() == scope.total) {
+            addLog("scope " + scope.id + (scope.failed > 0 ? " joined with failure" : " joined successfully"));
+        }
     }
 
     private void tween(Vt vt, Vec3 target, double duration, Arrival arrival) {
@@ -520,18 +725,27 @@ public final class Sim {
 
     public void burst(int count) {
         if (count <= 0) return;
+        if (scenario == Scenario.STRUCTURED) {
+            addLog("structured scenario has a fixed scope tree");
+            return;
+        }
         burst += count;
         addLog("burst: " + count + " tasks submitted");
     }
 
     public void gotoChapter(int requested) {
-        int selected = Math.floorMod(requested, 6);
+        int selected = Math.floorMod(requested, CHAPTER_COUNT);
+        Scenario previousScenario = scenario;
+        if (selected >= 6 || previousScenario != Scenario.NONE) clearWorkload();
         chapter = selected;
         freeRun = false;
         chaos = false;
         spawnRate = 0;
         pendingPark = false;
         pendingPin = false;
+        scenario = Scenario.NONE;
+        scenarioSubmitted = 0;
+        scenarioSpawned = 0;
 
         switch (selected) {
             case 0 -> reset(carriers.isEmpty() ? DEFAULT_CARRIERS : carriers.size());
@@ -568,13 +782,44 @@ public final class Sim {
                 chaos = !liveMode;
                 addLog("chapter: scale — flooding tasks");
             }
+            case 6 -> {
+                scenario = Scenario.PLATFORM_COMPARISON;
+                scenarioSubmitted = Math.min(maxThreads, Math.max(24, carriers.size() * 8));
+                if (!liveMode) burst += scenarioSubmitted;
+                addLog("chapter: platform vs virtual — same I/O workload");
+            }
+            case 7 -> {
+                scenario = Scenario.RESOURCE_POOL;
+                scenarioSubmitted = Math.min(maxThreads, Math.max(18, carriers.size() * 5));
+                if (!liveMode) burst += scenarioSubmitted;
+                addLog("chapter: connection pool — " + resourceCapacity() + " permits");
+            }
+            case 8 -> {
+                scenario = Scenario.CPU_BOUND;
+                scenarioSubmitted = Math.min(maxThreads, Math.max(24, carriers.size() * 6));
+                if (!liveMode) burst += scenarioSubmitted;
+                addLog("chapter: CPU bound — throughput plateaus at carrier count");
+            }
+            case 9 -> {
+                scenario = Scenario.STRUCTURED;
+                scenarioSubmitted = 12;
+                scopes.put(1, new ScopeProgress(1, "SEARCH", 4));
+                scopes.put(2, new ScopeProgress(2, "CHECKOUT", 4));
+                scopes.put(3, new ScopeProgress(3, "REPORT", 4));
+                if (!liveMode) burst += scenarioSubmitted;
+                addLog("chapter: structured scopes — fork, cancel, join");
+            }
             default -> throw new AssertionError("unreachable");
         }
     }
 
     public void setFreeRun(boolean enabled) {
+        if (scenario == Scenario.STRUCTURED && enabled) {
+            addLog("structured scenario uses a fixed scope tree");
+            return;
+        }
         freeRun = enabled;
-        chaos = enabled && !liveMode;
+        chaos = enabled && !liveMode && scenario == Scenario.NONE;
         spawnRate = enabled && !liveMode ? taskRate : 0;
         addLog(enabled ? "free run: continuous load" : "guided mode");
     }
@@ -584,21 +829,7 @@ public final class Sim {
             throw new IllegalArgumentException("carriers must be between 2 and 10");
         }
         random = RandomGeneratorFactory.of("L64X128MixRandom").create(seed);
-        var cancelled = new IllegalStateException("simulation reset");
-        for (Vt vt : vts) {
-            if (vt.firstMountSignal != null) vt.firstMountSignal.completeExceptionally(cancelled);
-            if (vt.resumeMountSignal != null) vt.resumeMountSignal.completeExceptionally(cancelled);
-        }
-        for (LiveEvent event : liveEvents) {
-            if (event instanceof LiveSpawned spawn) {
-                spawn.firstMount().completeExceptionally(cancelled);
-                spawn.resumeMount().completeExceptionally(cancelled);
-            }
-        }
-        liveEvents.clear();
-        liveById.clear();
-        vts.clear();
-        queue.clear();
+        clearWorkload();
         carriers.clear();
         for (int i = 0; i < carrierCount; i++) carriers.add(new Carrier(i));
         log.clear();
@@ -621,7 +852,42 @@ public final class Sim {
         pendingPark = false;
         pendingPin = false;
         bootAutoAdvanced = false;
+        scenario = Scenario.NONE;
+        scenarioSubmitted = 0;
+        scenarioSpawned = 0;
         hero = null;
+    }
+
+    private void clearWorkload() {
+        var cancelled = new IllegalStateException("simulation scenario changed");
+        for (Vt vt : vts) {
+            if (vt.firstMountSignal != null) vt.firstMountSignal.completeExceptionally(cancelled);
+            if (vt.resumeMountSignal != null) vt.resumeMountSignal.completeExceptionally(cancelled);
+        }
+        for (LiveEvent event : liveEvents) {
+            if (event instanceof LiveSpawned spawn) {
+                spawn.firstMount().completeExceptionally(cancelled);
+                spawn.resumeMount().completeExceptionally(cancelled);
+            }
+        }
+        liveEvents.clear();
+        liveById.clear();
+        vts.clear();
+        queue.clear();
+        permitWaiters.clear();
+        scopes.clear();
+        permitsInUse = 0;
+        burst = 0;
+        spawnAcc = 0;
+        completed = 0;
+        ioSecondsTotal = 0;
+        ioSamples = 0;
+        hero = null;
+        for (Carrier carrier : carriers) {
+            carrier.mounted = null;
+            carrier.pinT = 0;
+            carrier.heat = 0;
+        }
     }
 
     public void setLiveMode(boolean enabled) {
@@ -655,6 +921,13 @@ public final class Sim {
         return new Vec3(Math.cos(angle) * radius * 1.7, 80.5, Math.sin(angle) * radius * 0.62);
     }
 
+    private Vec3 queueTarget(Vt vt, int index) {
+        if (scenario == Scenario.STRUCTURED && vt.scopeId > 0) {
+            return new Vec3(-45 + vt.scopeChildIndex * 30, 80.5, -18 + (vt.scopeId - 1) * 18);
+        }
+        return queueSlot(index);
+    }
+
     public Vec3 heapSlot(int index) {
         int level = index / 25;
         int item = index % 25;
@@ -678,6 +951,8 @@ public final class Sim {
     public boolean running() { return running; }
     public boolean freeRun() { return freeRun; }
     public boolean liveMode() { return liveMode; }
+    public Scenario scenario() { return scenario; }
+    public int scenarioSubmitted() { return scenarioSubmitted; }
     public int maxThreads() { return maxThreads; }
     public long seed() { return seed; }
 
@@ -724,6 +999,14 @@ public final class Sim {
         return ioSamples == 0 ? 0 : ioSecondsTotal / ioSamples;
     }
 
+    public ResourcePoolStats resourcePoolStats() {
+        return new ResourcePoolStats(resourceCapacity(), permitsInUse, permitWaiters.size());
+    }
+
+    public List<ScopeStats> structuredScopes() {
+        return scopes.values().stream().map(ScopeProgress::snapshot).toList();
+    }
+
     /**
      * Checks internal ownership and queue/carrier invariants. Kept public so
      * diagnostics and property-style tests can inspect a running model.
@@ -753,6 +1036,24 @@ public final class Sim {
             if (queueState != queued.contains(vt)) violations.add("runnable queue/state mismatch: " + vt.id);
             boolean mountedState = vt.state == VtState.MOUNTING || vt.state == VtState.RUNNING;
             if (mountedState != (vt.carrier != null)) violations.add("mounted state/carrier mismatch: " + vt.id);
+        }
+        long permitHolders = vts.stream().filter(vt -> vt.resourcePermit).count();
+        if (permitHolders != permitsInUse) violations.add("database permit count mismatch");
+        if (permitsInUse > resourceCapacity()) violations.add("database permit pool exceeds capacity");
+        var waitingForPermit = java.util.Collections.newSetFromMap(
+                new java.util.IdentityHashMap<Vt, Boolean>());
+        for (Vt vt : permitWaiters) {
+            if (!waitingForPermit.add(vt)) violations.add("virtual thread waits twice for a database permit: " + vt.id);
+            if (!vt.waitingForPermit) violations.add("database permit queue/state mismatch: " + vt.id);
+            if (!vts.contains(vt)) violations.add("database permit queue contains unknown virtual thread: " + vt.id);
+        }
+        for (Vt vt : vts) {
+            if (vt.waitingForPermit != waitingForPermit.contains(vt)) {
+                violations.add("database permit waiter/state mismatch: " + vt.id);
+            }
+            if (vt.waitingForPermit && vt.resourcePermit) {
+                violations.add("virtual thread both holds and waits for a database permit: " + vt.id);
+            }
         }
         return List.copyOf(violations);
     }

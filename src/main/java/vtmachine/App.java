@@ -382,7 +382,7 @@ public final class App extends Application {
                     Boolean.parseBoolean(values.getOrDefault("presenter", "false")),
                     values.get("snapshot"),
                     boundedDouble(values.get("snapshot-at"), 4.5, 0.5, 30.0),
-                    boundedInt(values.get("snapshot-chapter"), 0, 0, 6),
+                    boundedInt(values.get("snapshot-chapter"), 0, 0, Sim.CHAPTER_COUNT),
                     Boolean.parseBoolean(values.getOrDefault("snapshot-follow", "false")));
         }
 

@@ -85,6 +85,10 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 | 4 | RESUME | clamp a parked VT's io ≤ 0.8 s | carriers |
 | 5 | PINNED | pendingPin=true | carriers |
 | 6 | SCALE | burst to 500, chaos on | overview · TOP preset = (0.65, 0.35, 300, 40) |
+| 7 | PLATFORM vs VT | clear workload; submit the same I/O-bound task count to the virtual-thread model; show the platform-thread baseline | overview |
+| 8 | POOL LIMIT | clear workload; submit database I/O tasks behind three connection permits | heap |
+| 9 | CPU BOUND | clear workload; submit compute-only tasks at 6× carrier count | overview |
+| 10 | STRUCTURED | clear workload; fork three four-child scopes; fail one CHECKOUT child and cancel its active siblings | overview |
 
 ## 4 · HUD & Controls
 
@@ -92,7 +96,7 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 |---|---|
 | Header | Pulsing green LED (1.6 s), title, GUIDED/FREE RUN toggle (ToggleGroup), status text BOOTING/RUNNING/PAUSED |
 | Right sidebar 290px | Counters include RUNNABLE, MOUNTED, PARKED, COMPLETED, live total, and utilization · task-profile mix · throughput graph · 4 behavior cards · event log, 7 clickable mono lines |
-| Narration card | Bottom-left 400px overlay: CHAPTER n/6, colored title, body text, ←/Next buttons. Chapter copy: §10 verbatim |
+| Narration card | Bottom-left 400px overlay: CHAPTER n/10, colored title, body text, ←/Next buttons. Chapter copy: §10 verbatim |
 | Bottom bar | Pause/Run · +25 tasks · Force park · Force pin · speed Slider + readout "0.75×" |
 | Keyboard | SPACE play/pause · ←/→ chapters · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480) |
 | Hover / follow | PickResult on the VT pool → tooltip; click a VT or log line to pin a lifecycle card showing RUNNABLE / MOUNTED / PARKED / TERMINATED durations |
@@ -310,6 +314,10 @@ Threading rule: everything above runs on the FX Application Thread. The only cro
 | 4 RESUME | The I/O completes. The stored continuation makes the VT runnable again and it remounts on ANY free carrier — not necessarily the one it left. Watch it land on a different slot. |
 | 5 PINNED | A remaining failure mode on Java 25: blocking while a native or foreign-function frame prevents unmounting pins the VT to its carrier. The slot locks red until the pin ends. Ordinary synchronized code no longer pins. |
 | 6 SCALE | The payoff. 500 mixed-duration tasks flood in and the machine does not grow: a fixed set of illustrative carrier lanes multiplexes fast, compute-heavy, and I/O-bound virtual threads, while parked waits retain lightweight heap-backed state. |
+| 7 PLATFORM vs VT | Run the same blocking I/O workload two ways. A platform-thread-per-task design ties up one costly OS thread per wait; virtual threads park cheaply while a small, fixed carrier pool keeps executing other work. |
+| 8 POOL LIMIT | Virtual threads remove the thread bottleneck, not downstream limits. Only three tasks may hold a database connection; every other VT parks in the heap without occupying a carrier until a permit becomes available. |
+| 9 CPU BOUND | Virtual threads improve blocking concurrency, not CPU parallelism. Compute-only tasks saturate every carrier and the run queue grows, but throughput plateaus at the available carrier/core count. |
+| 10 STRUCTURED | Related child VTs live inside parent scopes. Each scope forks four children and joins only after they finish; when one CHECKOUT child fails, its active siblings are cancelled and the failure is contained within that scope. |
 
 | Legend card | Body text |
 |---|---|
@@ -334,6 +342,10 @@ Acceptance — matches the HTML reference sim when:
 - [ ] Resume: parked VT re-enters queue HEAD and mounts on a different lane than it left (verify with forced park on C1 while C2 free)
 - [ ] Pinned: slot + core turn red, PINNED label shows, work % frozen for 2.6–3.8 s, other carriers keep flowing
 - [ ] Scale: counter reaches 500 spawned; RUNNABLE+MOUNTED+PARKED+in-flight ≈ live total; fps holds
+- [ ] Platform comparison: identical I/O task counts show N platform OS threads versus the configured fixed carrier count
+- [ ] Pool limit: at most three DB permits are active; extra VTs remain parked and carriers continue draining work
+- [ ] CPU bound: all carriers stay busy, no tasks park, and the queue grows beyond the carrier count
+- [ ] Structured: three four-child scope trees render; CHECKOUT records one failure, cancels active siblings, and joins exceptionally
 - [ ] Hero: exactly one trail at a time; new hero auto-picked after previous completes
 - [ ] Input: SPACE, ←/→, 1–4, drag orbit (φ clamped 0.15–1.45), scroll zoom (80–480), hover tooltip on any sphere
 - [ ] Determinism: same seed → identical event log across two runs
@@ -379,7 +391,7 @@ Camera goal lerp (every frame while a goal exists): `o.θ += (g.θ−o.θ)·0.06
 | Pinch gesture | `ZoomEvent.ZOOM`: dist += −ln(zoomFactor)·420; clamp 80–480; clear goal |
 | Mouse move (not dragging) | pick → tooltip (§14); recheck every 3rd frame is fine |
 | SPACE | toggle running; playLabel "Pause"↔"Run"; status RUNNING↔PAUSED. Ignore when focus is in a text input |
-| ← / → | gotoChapter(current ∓/± 1) — wraps modulo 6 |
+| ← / → | gotoChapter(current ∓/± 1) — wraps modulo 10 |
 | 1 / 2 / 3 / 4 | camera presets overview / carriers / heap / top |
 
 ## 13 · HUD — Exact Styling (completes §4)
@@ -394,7 +406,7 @@ Global: window bg `#070b12`; UI font Space Grotesk; data font IBM Plex Mono; all
 | Counter cards (2×2, gap 8) | padding 8 10; value mono 22px (colors: runnable #34d399, mounted #60a5fa, parked #a78bfa, completed #e6edf3); label mono 10px #7d8fa3 uppercase |
 | Key-behavior cards (×4, gap 7) | padding 8 11; title 14px/500 in the behavior color; body 12px #8ea2b8. Flash: full-card overlay, colors rgba(96,165,250,.16) / rgba(167,139,250,.16) / rgba(52,211,153,.16) / rgba(248,113,113,.18); opacity = max(0, 1−age/1.6), 0.35 s ease |
 | Event log | header 11px letter-spacing .16em #7d8fa3 "EVENT LOG"; lines mono 10.5px lh 1.75 #9db2c8, ellipsis-truncated, newest first, max 9 |
-| Narration card | 400px wide, bottom-left inset 16; bg rgba(10,16,25,.88), border #1d2b3c, radius 12, padding 14 16, blur backdrop if cheap. Row: "CHAPTER n/6" mono 12px #7d8fa3 · title 17px/700 in chapter color · spacer · ← button 30×26 (bg #0e1826, border #26364a, fg #9db2c8) · "Next →" button h26 padding 0 12 (bg #0f2b21, border #2a5c48, fg #6ee7b7). Body 14px lh 1.55 #b6c6d8 |
+| Narration card | 400px wide, bottom-left inset 16; bg rgba(10,16,25,.88), border #1d2b3c, radius 12, padding 14 16, blur backdrop if cheap. Row: "CHAPTER n/10" mono 12px #7d8fa3 · title 17px/700 in chapter color · spacer · ← button 30×26 (bg #0e1826, border #26364a, fg #9db2c8) · "Next →" button h26 padding 0 12 (bg #0f2b21, border #2a5c48, fg #6ee7b7). Body 14px lh 1.55 #b6c6d8 |
 | Camera preset buttons | top-right inset 16/14, gap 6; mono 10px, padding 5 10, radius 6, bg rgba(14,24,38,.8), border #26364a, fg #9db2c8; labels OVERVIEW CARRIERS HEAP TOP |
 | Shortcut hint | bottom-right inset 16; mono 10px #5c7089; include presenter, quality, contrast, notes, and camera shortcuts. Drag orbits; scrolling and pinch gestures zoom. |
 | Bottom bar | padding 10 22, top border. Pause/Run: 13px/500, padding 8 18, radius 8, width 90, green set (bg #0f2b21/border #2a5c48/fg #6ee7b7). "+25 tasks": blue set (#0f1e30/#24425f/#93c5fd). "Force park": purple set (#191531/#3d3564/#c4b5fd). "Force pin": red set (#2b0f0f/#5c2a2a/#fca5a5). Right: "SPEED" mono 12px #7d8fa3 · slider w130 accent #34d399, range 0.25–3 step 0.25 default 0.75 · readout mono 12px #e6edf3 w44 "0.75×" (format %.2f×) |
@@ -420,16 +432,16 @@ Log line format: `%03ds %s` where the integer is floor(sim.t). Every message the
 | force pin, none eligible | `no running VT` |
 | mode → free | `free run: continuous load` |
 | mode → guided | `guided mode` |
-| chapter enter (2–6) | `chapter: mount` / `chapter: park` / `chapter: resume` / `chapter: pinned` / `chapter: scale — flooding tasks` |
+| chapter enter (2–10) | lifecycle logs plus `platform vs virtual`, `connection pool`, `CPU bound`, and `structured scopes` scenario logs |
 
 Tooltip text: `VT-{id} · {state}` + (if carrier ≥0) ` on C{n}` + (if RUNNING) ` · {pct}% done` where pct = clamp(round((1−work/work0)·100), 0, 100) + (if PARKED) ` · I/O {io:%.1f}s`. State strings are the lowercase enum names used in the web sim: toQueue, queued, mounting, running, parking, parked, done.
 
 ## 15 · Chapter Engine — Exact Semantics (completes §3)
 
-`gotoChapter(i)` (i is 0-based internally; HUD shows i+1 of 6):
+`gotoChapter(i)` (i is 0-based internally; HUD shows i+1 of 10):
 
 ```
-i = ((i mod 6) + 6) mod 6                  // ← and → wrap around
+i = ((i mod 10) + 10) mod 10               // ← and → wrap around
 mode = GUIDED; chaos = false; spawnRate = 0
 pendingPark = pendingPin = false           // stale flags never leak across chapters
 switch i:
@@ -445,6 +457,11 @@ switch i:
             pendingPin = true; camera CARRIERS; log "chapter: pinned" // keeps work queued behind the pin
   5 SCALE:  burst += maxThreads − vts.size; chaos = true; camera OVERVIEW
             log "chapter: scale — flooding tasks"
+  6 COMPARE: clear workload; burst += max(24, carriers*8) I/O tasks; camera OVERVIEW
+  7 POOL:    clear workload; burst += max(18, carriers*5) DB tasks; permits = min(3, carriers); camera HEAP
+  8 CPU:     clear workload; burst += max(24, carriers*6) compute tasks; camera OVERVIEW
+  9 SCOPE:   clear workload; create SEARCH/CHECKOUT/REPORT scopes with four children each;
+             one CHECKOUT child fails and cancels its active siblings; camera OVERVIEW
 ```
 
 Edge cases an agent must honor:
@@ -495,6 +512,6 @@ Recommended reconstruction order (each step runs):
 2. `App` shell + HUD with dummy stats (all §13 styling).
 3. `MachineScene` statics: slabs, cores, slots, pillars, ring, heap, grid, labels (§2, §16).
 4. `CameraRig` + input (§12) — verify all four presets frame the machine.
-5. VT pool + sync (§9) driven by Sim — chapters 1–5 acceptance boxes (§11).
+5. VT pool + sync (§9) driven by Sim — chapters 1–10 acceptance boxes (§11).
 6. Boot rise, hero trail, tooltip, flash cards, keyboard — remaining acceptance boxes.
 7. Optional: real-virtual-thread feed (§6.5) behind a `--live` flag.

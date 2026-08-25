@@ -67,7 +67,7 @@ public final class SpeakerNotesWindow {
         timer.setText("%02d:%02d  ·  %s  ·  %.0f FPS".formatted(
                 (int) elapsedSeconds / 60, (int) elapsedSeconds % 60,
                 autoplay ? "AUTO-PLAY" : "MANUAL", fps));
-        chapter.setText((selected + 1) + "/6  " + Hud.chapterTitle(selected));
+        chapter.setText((selected + 1) + "/" + Sim.CHAPTER_COUNT + "  " + Hud.chapterTitle(selected));
         body.setText(Hud.chapterText(selected));
         next.setText("NEXT → " + Hud.chapterTitle(selected + 1) + "\n"
                 + Hud.chapterText(selected + 1));
@@ -78,7 +78,7 @@ public final class SpeakerNotesWindow {
                 + "task mix: " + mix.fast() + " fast · " + mix.compute() + " compute · "
                 + mix.ioBound() + " I/O-bound\n"
                 + "Keys: ←/→ chapter · Space pause · P presenter · A auto · 0 overview · Q quality · H contrast");
-        progress.setProgress((selected + 1) / 6.0);
+        progress.setProgress((selected + 1) / (double) Sim.CHAPTER_COUNT);
     }
 
     public void setSim(Sim sim) { this.sim = sim; }

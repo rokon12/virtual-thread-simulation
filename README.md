@@ -5,7 +5,7 @@ park, resume, and pin across a small carrier pool. The implementation follows
 [`design/JavaFX-Spec.md`](design/JavaFX-Spec.md) and uses the accompanying HTML
 simulation as its behavioral reference.
 
-![The Virtual Thread Machine demonstrating ten carrier lanes, heap-backed I/O waits, and virtual-thread completion](docs/media/virtual-thread-machine-demo.gif)
+![The Virtual Thread Machine demonstrating parking, pinning, downstream limits, CPU saturation, and structured scopes](docs/media/virtual-thread-machine-demo.gif)
 
 ## Run
 
@@ -66,6 +66,18 @@ with carrier retention directly, while a pressure bar expands and contracts
 with the scheduler run queue. Completed VTs release their carrier, turn white,
 and dissolve in place.
 
+Four advanced chapters turn the machine into a performance lab:
+
+- `PLATFORM vs VT` runs the same blocking workload as one-platform-thread-per-task
+  and as virtual threads on a fixed carrier pool.
+- `POOL LIMIT` places a three-permit database connection pool downstream; excess
+  VTs visibly park without consuming carriers. In `LIVE JDK` mode the permits
+  are enforced by a fair `Semaphore`, so the wait is performed by real VTs.
+- `CPU BOUND` saturates the carriers with compute-only tasks and plots the
+  throughput plateau at the carrier/core count.
+- `STRUCTURED` groups child VTs under parent scopes, shows joins, and contains a
+  child failure by cancelling only its active siblings.
+
 ## Reproducible settings
 
 Command-line settings use `--name=value` syntax:
@@ -85,8 +97,8 @@ Supported settings:
 
 For visual smoke tests, `--snapshot=/path/image.ppm` writes a full-window PPM
 after 4.5 seconds. Override the delay with `--snapshot-at=<seconds>`.
-Use `--snapshot-chapter=1..6` to capture a specific chapter. The helper script
-`scripts/capture-chapters.sh` captures all six with seed 42. Add
+Use `--snapshot-chapter=1..10` to capture a specific chapter. The helper script
+`scripts/capture-chapters.sh` captures all ten with seed 42. Add
 `--snapshot-follow` to include the selected hero VT's lifecycle card in a
 visual smoke test.
 

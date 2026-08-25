@@ -5,6 +5,7 @@ import java.util.concurrent.CompletableFuture;
 
 import static vtmachine.model.Sim.IoDevice;
 import static vtmachine.model.Sim.LifecyclePhase;
+import static vtmachine.model.Sim.Outcome;
 import static vtmachine.model.Sim.VtState;
 import static vtmachine.model.Sim.TaskProfile;
 
@@ -30,6 +31,12 @@ public final class Vt {
     boolean hero;
     boolean live;
     boolean liveParkPending;
+    int scopeId;
+    int scopeChildIndex;
+    Outcome outcome = Outcome.ACTIVE;
+    boolean failureCandidate;
+    boolean resourcePermit;
+    boolean waitingForPermit;
     CompletableFuture<Void> firstMountSignal;
     CompletableFuture<Void> resumeMountSignal;
     Tween tween;
@@ -62,6 +69,11 @@ public final class Vt {
     public boolean resumed() { return resumed; }
     public boolean hero() { return hero; }
     public boolean live() { return live; }
+    public int scopeId() { return scopeId; }
+    public int scopeChildIndex() { return scopeChildIndex; }
+    public Outcome outcome() { return outcome; }
+    public boolean resourcePermit() { return resourcePermit; }
+    public boolean waitingForPermit() { return waitingForPermit; }
     public boolean isTweening() { return tween != null; }
     public LifecyclePhase lifecyclePhase() { return lifecyclePhase; }
 

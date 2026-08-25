@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -35,20 +36,33 @@ public final class LiveWorkload implements AutoCloseable {
     private final AtomicInteger submitted = new AtomicInteger();
     private final AtomicInteger finished = new AtomicInteger();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final Semaphore databasePermits;
     private final ConcurrentLinkedQueue<CompletableFuture<Void>> ioWaits = new ConcurrentLinkedQueue<>();
     private final Set<CompletableFuture<Void>> mountSignals = ConcurrentHashMap.newKeySet();
     private final RecordingStream recordingStream;
     private double spawnAccumulator;
+    private int pendingScenarioTasks;
+    private TaskProfile pendingScenarioProfile;
+    private boolean pendingDatabaseLimit;
 
     public LiveWorkload(Sim sim, int maxActive, double taskRate, long seed) {
         this.sim = sim;
         this.maxActive = maxActive;
         this.taskRate = taskRate;
         this.seed = seed;
+        databasePermits = new Semaphore(Math.min(Sim.DATABASE_PERMITS, sim.carriers().size()), true);
         recordingStream = startPinWatch();
     }
 
     public int submit(int requested) {
+        return submit(requested, null);
+    }
+
+    private int submit(int requested, TaskProfile forcedProfile) {
+        return submit(requested, forcedProfile, false);
+    }
+
+    private int submit(int requested, TaskProfile forcedProfile, boolean databaseLimited) {
         if (requested <= 0 || closed.get()) return 0;
         int accepted = 0;
         while (accepted < requested) {
@@ -58,7 +72,7 @@ public final class LiveWorkload implements AutoCloseable {
                 continue;
             }
             int sequence = submitted.incrementAndGet();
-            executor.submit(() -> runTask(sequence));
+            executor.submit(() -> runTask(sequence, forcedProfile, databaseLimited));
             accepted++;
         }
         if (accepted > 0) sim.recordMessage("LIVE: " + accepted + " virtual tasks submitted");
@@ -66,6 +80,7 @@ public final class LiveWorkload implements AutoCloseable {
     }
 
     public void tick(double wallSeconds, boolean continuous) {
+        drainScheduledScenario();
         if (!continuous || closed.get()) {
             spawnAccumulator = 0;
             return;
@@ -80,7 +95,10 @@ public final class LiveWorkload implements AutoCloseable {
     }
 
     public void onChapter(int chapter) {
-        switch (Math.floorMod(chapter, 6)) {
+        pendingScenarioTasks = 0;
+        pendingScenarioProfile = null;
+        pendingDatabaseLimit = false;
+        switch (Math.floorMod(chapter, Sim.CHAPTER_COUNT)) {
             case 1 -> submit(6);
             case 2 -> submit(Math.max(0, 4 - active.get()));
             case 3 -> {
@@ -90,8 +108,29 @@ public final class LiveWorkload implements AutoCloseable {
             case 4 -> submit(Math.max(0,
                     Math.min(maxActive, sim.carriers().size() * 4) - active.get()));
             case 5 -> submit(maxActive - active.get());
+            case 6 -> scheduleScenario(Math.min(maxActive, Math.max(24, sim.carriers().size() * 8)),
+                    TaskProfile.IO_BOUND, false);
+            case 7 -> scheduleScenario(Math.min(maxActive, Math.max(18, sim.carriers().size() * 5)),
+                    TaskProfile.IO_BOUND, true);
+            case 8 -> scheduleScenario(Math.min(maxActive, Math.max(24, sim.carriers().size() * 6)),
+                    TaskProfile.COMPUTE, false);
+            case 9 -> scheduleScenario(Math.min(maxActive, 12), null, false);
             default -> { }
         }
+    }
+
+    private void scheduleScenario(int count, TaskProfile profile, boolean databaseLimited) {
+        pendingScenarioTasks = count;
+        pendingScenarioProfile = profile;
+        pendingDatabaseLimit = databaseLimited;
+        drainScheduledScenario();
+    }
+
+    private void drainScheduledScenario() {
+        if (pendingScenarioTasks <= 0 || closed.get()) return;
+        int accepted = submit(Math.min(6, pendingScenarioTasks),
+                pendingScenarioProfile, pendingDatabaseLimit);
+        pendingScenarioTasks -= accepted;
     }
 
     public boolean expediteIo() {
@@ -102,14 +141,14 @@ public final class LiveWorkload implements AutoCloseable {
         return false;
     }
 
-    private void runTask(int sequence) {
+    private void runTask(int sequence, TaskProfile forcedProfile, boolean databaseLimited) {
         CompletableFuture<Void> firstMount = new CompletableFuture<>();
         CompletableFuture<Void> resumeMount = new CompletableFuture<>();
         mountSignals.add(firstMount);
         mountSignals.add(resumeMount);
         long threadId = Thread.currentThread().threadId();
         SplittableRandom random = new SplittableRandom(seed ^ (sequence * 0x9e3779b97f4a7c15L));
-        TaskProfile profile = randomProfile(random);
+        TaskProfile profile = forcedProfile == null ? randomProfile(random) : forcedProfile;
         int firstCpuMillis = switch (profile) {
             case FAST -> 45 + random.nextInt(150);
             case COMPUTE -> 350 + random.nextInt(651);
@@ -128,6 +167,12 @@ public final class LiveWorkload implements AutoCloseable {
             cpuPhase(threadId, 0.0, 0.38, firstCpuMillis);
 
             sim.post(new Sim.LiveParked(threadId));
+            boolean permitAcquired = false;
+            if (databaseLimited) {
+                databasePermits.acquire();
+                permitAcquired = true;
+                sim.post(new Sim.LivePermitAcquired(threadId));
+            }
             CompletableFuture<Void> ioGate = new CompletableFuture<>();
             ioWaits.add(ioGate);
             long ioStarted = System.nanoTime();
@@ -137,6 +182,7 @@ public final class LiveWorkload implements AutoCloseable {
                 // A real timed wait completed; the virtual thread was unmounted meanwhile.
             } finally {
                 ioWaits.remove(ioGate);
+                if (permitAcquired) databasePermits.release();
             }
 
             double ioSeconds = (System.nanoTime() - ioStarted) / 1_000_000_000.0;

@@ -33,6 +33,28 @@ class LiveWorkloadTest {
         }
     }
 
+    @Test
+    void realVirtualThreadsAlsoQueueBehindTheDatabasePermitLimit() throws Exception {
+        Sim sim = new Sim(4, 50, 1.4, 456);
+        sim.setLiveMode(true);
+        advance(sim, 3.1);
+        sim.gotoChapter(7);
+        try (LiveWorkload workload = new LiveWorkload(sim, 50, 1.4, 456)) {
+            workload.onChapter(7);
+            long deadline = System.nanoTime() + Duration.ofSeconds(6).toNanos();
+            Sim.ResourcePoolStats pool = sim.resourcePoolStats();
+            while ((pool.inUse() < pool.capacity() || pool.waiting() == 0)
+                    && System.nanoTime() < deadline) {
+                sim.tick(STEP);
+                Thread.sleep(2);
+                pool = sim.resourcePoolStats();
+            }
+            assertEquals(3, pool.inUse());
+            assertTrue(pool.waiting() > 0);
+            assertTrue(sim.invariantViolations().isEmpty(), sim.invariantViolations().toString());
+        }
+    }
+
     private static void advance(Sim sim, double seconds) {
         for (int i = 0; i < Math.ceil(seconds / STEP); i++) sim.tick(STEP);
     }
