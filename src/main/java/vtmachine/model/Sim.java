@@ -931,8 +931,8 @@ public final class Sim {
     public Vec3 heapSlot(int index) {
         int level = index / 25;
         int item = index % 25;
-        return new Vec3(118 + (item % 5 - 2) * 6.4, 34 + level * 6.4,
-                (item / 5 - 2) * 6.4);
+        return new Vec3(118 + (item % 5 - 2) * 6.8, 34 + level * 6.8,
+                (item / 5 - 2) * 6.8);
     }
 
     public double laneX(int index) {

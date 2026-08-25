@@ -68,8 +68,10 @@ CPU work, longer compute work, and I/O-bound work with randomized 1–8 second
 waits. I/O-bound VTs carry a small purple satellite before blocking. When they
 park, a stack-chunk marker moves from the released carrier into the heap while
 an animated connection continues to an external network, disk, timer, or
-database endpoint. The continuation returns through the run queue before
-mounting on any available carrier.
+database endpoint. The parked VT keeps the same sphere identity and size inside
+an open heap basket, with its retained stack shown as a small plate beneath it.
+The continuation returns through the run queue before mounting on any available
+carrier.
 
 Clicking a VT opens a live lifecycle strip for `RUNNABLE`, `MOUNTED`, `PARKED`,
 and `TERMINATED` durations. The PARK and PINNED chapters compare carrier release

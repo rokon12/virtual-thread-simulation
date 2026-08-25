@@ -50,7 +50,7 @@ World units are abstract; keep the numbers below verbatim. **IMPORTANT:** the HT
 |---|---|---|
 | green | #34d399 | runnable/queued VT, resume flash, GUIDED accent |
 | blue | #60a5fa | mounted/running VT, carrier layer, mount flash |
-| purple | #a78bfa | parked VT, scheduler, heap/continuations |
+| purple | #a78bfa | parked VT, scheduler, open heap basket/continuations |
 | amber | #f5b84c | OS/CPU layer, core emissive (0.2+heat·0.9) |
 | red | #f87171 | pinned carrier + its VT, PINNED label |
 | white | #e6edf3 | terminating VT dissolve, headline text |
@@ -289,7 +289,7 @@ MachineScene.sync(sim):
 4 VT POOL     i=0; for vt in sim.vts():
                 s = sphere[i], g = glow[i]
                 s.translate = vt.pos (Y negated by world scale — set raw values)
-                scale: RUNNING 1.5+0.12·sin(7t+id) · PARKED 0.9 · else 1.0 · hero ×1.45
+                scale: RUNNING 1.5+0.12·sin(7t+id) · PARKED 1.5+0.08·sin(5t+id) · else 1.0 · hero ×1.45
                 material: QUEUED/TO_QUEUE green · RUNNING/MOUNTING blue (red if carrier pinned)
                           PARKING/PARKED purple · DONE white
                 g mirrors s at scale ×1.15; both visible; i++
@@ -488,7 +488,7 @@ Rendering: each label is a canvas-drawn texture `600 {px}px IBM Plex Mono` on tr
 | CARRIER THREADS | #60a5fa | (−81, 33, 0) | 28 | right-middle |
 | SCHEDULER · ForkJoinPool | #a78bfa | (−81, 59, 0) | 28 | right-middle |
 | VIRTUAL THREADS · runnable | #34d399 | (−91, 85, 0) | 28 | right-middle |
-| HEAP · {n} PARKED STACK CHUNKS · I/O EXTERNAL | #a78bfa | (118, 74, 0) | 28 | center; live count plus up to 12 projected VT-id badges |
+| HEAP · {n} PARKED STACK CHUNKS · I/O EXTERNAL | #a78bfa | (118, 74, 0) | 28 | center; open wire basket, full-size VT spheres, live count, selected VT plus up to three projected VT-id badges |
 | RUN QUEUE · {state} | #34d399 | (0, 91, 28) | 28 | expands with runnable pressure and announces BACKPRESSURE above carrier capacity |
 | EXTERNAL I/O + endpoint labels | #a78bfa | x=160, y=78, z=−52..53 | 22–28 | network, disk, timer, and database wait destinations |
 | C1…Cn | #8ea2b8 | (laneX(i), 22, 16) | 24 | center |

@@ -48,6 +48,7 @@ import vtmachine.model.Vec3;
 
 /** The complete 3D machine, its projected labels, tooltip, and camera controls. */
 public final class MachineScene extends StackPane {
+    private static final int PARKED_BADGE_LIMIT = 4;
     private static final Color GREEN = Color.web("#34d399");
     private static final Color BLUE = Color.web("#60a5fa");
     private static final Color PURPLE = Color.web("#a78bfa");
@@ -119,7 +120,7 @@ public final class MachineScene extends StackPane {
 
     private TorusMesh schedulerRing;
     private Box queuePressureBar;
-    private Shape3D heapGhost;
+    private Group heapGhost;
     private Label heapLabel;
     private Label queuePressureLabel;
     private Label heroLabel;
@@ -166,7 +167,7 @@ public final class MachineScene extends StackPane {
         tooltip.setManaged(false);
         tooltip.setVisible(false);
         labelOverlay.getChildren().add(tooltip);
-        for (int i = 0; i < 12; i++) {
+        for (int i = 0; i < PARKED_BADGE_LIMIT; i++) {
             Label badge = new Label();
             badge.getStyleClass().add("parked-badge");
             badge.setManaged(false);
@@ -312,12 +313,8 @@ public final class MachineScene extends StackPane {
         heap.setTranslateX(118);
         heap.setTranslateY(30);
         addBoxWithEdges(heap, 40, 3.5, 40, 0, 0, 0, Color.web("#171129"), PURPLE);
-        Box ghost = new Box(36, 44, 36);
-        ghost.setTranslateY(24);
-        ghost.setMaterial(transparentMaterial(PURPLE, 0.07));
-        ghost.setCullFace(CullFace.NONE);
-        heapGhost = ghost;
-        heap.getChildren().add(ghost);
+        heapGhost = buildHeapBasket();
+        heap.getChildren().add(heapGhost);
         world.getChildren().add(heap);
         bootLayers.add(new BootLayer(heap, 30, 4));
 
@@ -349,6 +346,41 @@ public final class MachineScene extends StackPane {
         queuePressureLabel = addProjectedLabel("RUN QUEUE · EMPTY", "green",
                 0, 91, 28, AnchorAlignment.CENTER);
         addProjectedLabel("APPLICATION TASKS ↓", "muted", -130, 112, 0, AnchorAlignment.CENTER);
+    }
+
+    /** An open wire basket keeps parked VTs visible instead of tinting them through a solid cube. */
+    private Group buildHeapBasket() {
+        Group basket = new Group();
+        PhongMaterial railMaterial = material(PURPLE);
+        double halfWidth = 18;
+        double height = 44;
+        double thickness = 0.75;
+
+        for (int sx : new int[] {-1, 1}) {
+            for (int sz : new int[] {-1, 1}) {
+                Box post = new Box(thickness, height, thickness);
+                post.setTranslateX(sx * halfWidth);
+                post.setTranslateY(24);
+                post.setTranslateZ(sz * halfWidth);
+                post.setMaterial(railMaterial);
+                basket.getChildren().add(post);
+            }
+        }
+        for (double y : new double[] {3, 13, 24, 35, 46}) {
+            for (int side : new int[] {-1, 1}) {
+                Box xRail = new Box(halfWidth * 2, thickness, thickness);
+                xRail.setTranslateY(y);
+                xRail.setTranslateZ(side * halfWidth);
+                xRail.setMaterial(railMaterial);
+                Box zRail = new Box(thickness, thickness, halfWidth * 2);
+                zRail.setTranslateX(side * halfWidth);
+                zRail.setTranslateY(y);
+                zRail.setMaterial(railMaterial);
+                basket.getChildren().addAll(xRail, zRail);
+            }
+        }
+        basket.setMouseTransparent(true);
+        return basket;
     }
 
     private void buildExternalIo() {
@@ -712,7 +744,7 @@ public final class MachineScene extends StackPane {
         for (BootLayer layer : bootLayers) {
             double amount = clamp((displayBootT() - layer.order * 0.5) / 0.5, 0, 1);
             layer.group.setTranslateY(layer.restY - (1 - amount) * 18);
-            if (layer.order == 4) heapGhost.setOpacity(amount * 0.22);
+            if (layer.order == 4) heapGhost.setOpacity(amount * 0.48);
         }
     }
 
@@ -863,7 +895,7 @@ public final class MachineScene extends StackPane {
         double scale = switch (vt.state()) {
             case RUNNING -> 1.5 + 0.12 * Math.sin(displayTime() * 7 + vt.id());
             case MOUNTING -> 1.5;
-            case PARKING, PARKED -> 1.15 + 0.08 * Math.sin(displayTime() * 5 + vt.id());
+            case PARKING, PARKED -> 1.5 + 0.08 * Math.sin(displayTime() * 5 + vt.id());
             case DONE, DEAD -> 1.35 - clamp(vt.lifecycleAge(displayTime()) / 1.35, 0, 1) * 0.85;
             default -> 1;
         };
@@ -903,24 +935,32 @@ public final class MachineScene extends StackPane {
         heroProjection.anchor.setTranslateX(hero.x());
         heroProjection.anchor.setTranslateY(hero.y() + 8);
         heroProjection.anchor.setTranslateZ(hero.z());
-        heroLabel.setVisible(true);
+        // A followed hero already has the contextual parked badge/lifecycle card.
+        heroLabel.setVisible(hero != followedVt);
     }
 
     private void syncParkedBadges() {
-        int parked = 0;
-        int badgeIndex = 0;
+        List<ThreadView> labelled = new ArrayList<>(PARKED_BADGE_LIMIT);
+        if (followedVt != null && followedVt.state() == Sim.VtState.PARKED) {
+            labelled.add(followedVt);
+        }
+        int contextualLabels = 0;
         for (ThreadView vt : displayVts()) {
-            if (vt.state() != Sim.VtState.PARKED) continue;
-            parked++;
-            if (badgeIndex >= parkedBadges.size()) continue;
+            if (vt.state() != Sim.VtState.PARKED || vt == followedVt || vt.hero()) continue;
+            labelled.add(vt);
+            if (++contextualLabels >= PARKED_BADGE_LIMIT - 1) break;
+        }
+
+        int badgeIndex = 0;
+        for (ThreadView vt : labelled) {
             Label badge = parkedBadges.get(badgeIndex++);
-            Point3D scenePoint = world.localToScene(vt.x(), vt.y() + 3.6, vt.z(), true);
+            Point3D scenePoint = world.localToScene(vt.x(), vt.y() + 5.4, vt.z(), true);
             Point3D local = labelOverlay.sceneToLocal(scenePoint);
             if (!Double.isFinite(local.getX()) || !Double.isFinite(local.getY())) {
                 badge.setVisible(false);
                 continue;
             }
-            badge.setText("● VT-" + vt.id());
+            badge.setText("VT-" + vt.id());
             badge.setAccessibleText("Virtual thread " + vt.id() + " parked for I/O in the heap area");
             badge.autosize();
             badge.relocate(clamp(local.getX() - badge.getWidth() / 2, 3,
