@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;background:#070b12}
+*{box-sizing:border-box}
+a{color:#6ee7b7;text-decoration:none}a:hover{color:#a7f3d0}
+table{border-collapse:collapse;width:100%;font-family:'IBM Plex Mono',monospace;font-size:12px}
+th{text-align:left;color:#7d8fa3;font-weight:500;padding:6px 10px;border-bottom:1px solid #1d2b3c;font-size:11px;letter-spacing:.08em}
+td{padding:6px 10px;border-bottom:1px solid #131e2b;color:#c2d2e2;vertical-align:top}
+code{font-family:'IBM Plex Mono',monospace;font-size:12px;color:#93c5fd;background:#0e1826;padding:1px 5px;border-radius:4px}
+pre{font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.6;color:#c2d2e2;background:#0b1220;border:1px solid #172533;border-radius:10px;padding:14px 16px;overflow-x:auto;margin:0}
+</style>
+</helmet>
+<div style="min-height:100vh;font-family:'Space Grotesk',sans-serif;color:#e6edf3;background:#070b12;display:flex;justify-content:center">
+<div style="width:920px;max-width:96vw;padding:40px 0 80px">
+  <div style="margin-bottom:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.2em;color:#34d399">IMPLEMENTATION SPEC · JAVA 25 · JAVAFX SUBSCENE 3D</div>
+  <h1 style="margin:0 0 6px;font-size:32px;font-weight:700;letter-spacing:.01em">The Virtual Thread Machine — JavaFX Port</h1>
+  <div style="font-size:14px;color:#8ea2b8;margin-bottom:18px">Everything needed to rebuild <a href="Virtual Thread Machine 3D.dc.html">the HTML simulation</a> as a native JavaFX app. Full scope: 3D scene + HUD/controls. FXyz3D permitted.</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:36px;font-family:'IBM Plex Mono',monospace;font-size:11px">
+    <a href="#arch" style="border:1px solid #26364a;border-radius:6px;padding:5px 10px">1 ARCHITECTURE</a>
+    <a href="#geo" style="border:1px solid #26364a;border-radius:6px;padding:5px 10px">2 SCENE &amp; GEOMETRY</a>
+    <a href="#fsm" style="border:1px solid #26364a;border-radius:6px;padding:5px 10px">3 STATE MACHINE &amp; TIMING</a>
+    <a href="#hud" style="border:1px solid #26364a;border-radius:6px;padding:5px 10px">4 HUD &amp; CONTROLS</a>
+    <a href="#map" style="border:1px solid #26364a;border-radius:6px;padding:5px 10px">5 WEB→JAVAFX MAPPING</a>
+    <a href="#code" style="border:1px solid #26364a;border-radius:6px;padding:5px 10px">6 KEY SNIPPETS</a>
+  </div>
+
+  <h2 id="arch" style="font-size:20px;margin:0 0 12px;color:#60a5fa">1 · Architecture</h2>
+  <div style="font-size:13.5px;line-height:1.6;color:#b6c6d8;margin-bottom:14px;text-wrap:pretty">Keep the simulation model pure (no JavaFX imports) so it can be unit-tested; the scene and HUD observe it. One <code>AnimationTimer</code> drives everything — do not use per-node <code>Timeline</code>s for thread movement, they don't scale to 500 nodes.</div>
+  <table style="margin-bottom:14px">
+    <tr><th style="width:220px">CLASS</th><th>RESPONSIBILITY</th></tr>
+    <tr><td>vtmachine.App</td><td>Stage, root BorderPane: SubScene center, HUD right (290px), controls bottom, narration overlay via StackPane</td></tr>
+    <tr><td>vtmachine.model.Sim</td><td>Pure model: tick(dt), spawn/mount/park/resume/pin/complete, chapter engine, event log ring buffer. No JavaFX types</td></tr>
+    <tr><td>vtmachine.model.Vt</td><td>id, state, pos (double x,y,z), work/work0, io, carrier ref, hero flag, active tween</td></tr>
+    <tr><td>vtmachine.model.Carrier</td><td>mounted Vt, pinT countdown, heat 0..1</td></tr>
+    <tr><td>vtmachine.view.MachineScene</td><td>SubScene + world Group: slabs, cores, slots, ring, heap, VT node pool, hero trail, labels</td></tr>
+    <tr><td>vtmachine.view.CameraRig</td><td>Orbit spherical (theta, phi, dist, targetY), presets, mouse drag/scroll, lerp-to-goal</td></tr>
+    <tr><td>vtmachine.view.Hud</td><td>Counters, key-behavior flash cards, event log, narration card, speed slider, buttons</td></tr>
+  </table>
+  <div style="font-size:12.5px;color:#8ea2b8;margin-bottom:36px">Meta-note for the talk: the sim models virtual threads but should also <em>run on</em> them — feed the model from a real <code>Thread.ofVirtual()</code> executor if you want live data instead of the synthetic spawner (see <a href="#code">6.5</a>).</div>
+
+  <h2 id="geo" style="font-size:20px;margin:0 0 12px;color:#34d399">2 · Scene &amp; Geometry</h2>
+  <div style="font-size:13.5px;line-height:1.6;color:#b6c6d8;margin-bottom:14px;text-wrap:pretty">World units are abstract; keep the numbers below verbatim. IMPORTANT: the HTML sim is Y-up; JavaFX 3D is Y-down. Wrap the world Group in <code>new Scale(1, -1, 1)</code> (or negate all Y values) once, then use these coordinates unchanged. Camera: <code>PerspectiveCamera(true)</code>, fieldOfView 45, near 1, far 1000.</div>
+  <table style="margin-bottom:14px">
+    <tr><th style="width:190px">ELEMENT</th><th style="width:230px">GEOMETRY (w×h×d, center)</th><th>NOTES</th></tr>
+    <tr><td>Layer 0 · CPU cores slab</td><td>Box 150×3.5×64 @ y=0</td><td>fill #1c1508, edge #f5b84c</td></tr>
+    <tr><td>Layer 1 · Carriers slab</td><td>Box 150×3.5×56 @ y=26</td><td>fill #0a1626, edge #60a5fa</td></tr>
+    <tr><td>Layer 2 · Scheduler slab</td><td>Box 150×3.5×50 @ y=52</td><td>fill #150f2b, edge #a78bfa; rotating torus r=14 tube=0.9 @ y=56, spin 1.5 rad/s</td></tr>
+    <tr><td>Layer 3 · Runnable deck</td><td>Box 170×3.5×66 @ y=78</td><td>fill #0a2018, edge #34d399</td></tr>
+    <tr><td>Heap tower</td><td>Box 40×3.5×40 @ (118,30,0); ghost column Box 36×44×36 @ (118,54,0), opacity .07</td><td>edge #a78bfa; parked VTs stack above</td></tr>
+    <tr><td>Core i (i=0..C−1)</td><td>Box 12×8×12 @ (laneX(i), 6, 0)</td><td>laneX(i) = (i−(C−1)/2)·26 ; C=4 default, clamp 2–6</td></tr>
+    <tr><td>Carrier slot i</td><td>Torus r=6 tube=0.7 @ (laneX(i), 28.4, 0), flat</td><td>idle #24425f · occupied #60a5fa · pinned #f87171 + pulse scale ±8% @ 8 rad/s</td></tr>
+    <tr><td>Lane pillar i</td><td>Cylinder r=0.5 h=26 @ (laneX(i), 15, 0)</td><td>#60a5fa @ 18% opacity</td></tr>
+    <tr><td>VT particle</td><td>Sphere r=1.9 (pool of maxThreads+40)</td><td>plus glow shell Sphere r=3.6, opacity .22 (see <a href="#map">§5</a>)</td></tr>
+    <tr><td>Mount position</td><td>(laneX(i), 30, 0)</td><td>running VT sits here; pulse scale 1.5±0.12 @ 7 rad/s</td></tr>
+    <tr><td>Queue slot i</td><td>spiral: a=0.55i, r=7+2.6√i → (cos a·1.7r, 80.5, sin a·0.62r)</td><td>elliptical spiral fills the deck to 500</td></tr>
+    <tr><td>Heap slot i</td><td>x=118+((i%25)%5−2)·6.4, y=34+⌊i/25⌋·6.4, z=(⌊(i%25)/5⌋−2)·6.4</td><td>5×5 per level, stacks upward</td></tr>
+    <tr><td>Task inlet / exit</td><td>spawn (−130±10, 105+rnd·12, ±10) · exit (150, −14, 40)</td><td>labels "APPLICATION TASKS ↓" / "COMPLETED →"</td></tr>
+  </table>
+  <table style="margin-bottom:36px">
+    <tr><th style="width:140px">COLOR</th><th style="width:110px">HEX</th><th>ROLE</th></tr>
+    <tr><td style="color:#34d399">green</td><td>#34d399</td><td>runnable/queued VT, resume flash, GUIDED accent</td></tr>
+    <tr><td style="color:#60a5fa">blue</td><td>#60a5fa</td><td>mounted/running VT, carrier layer, mount flash</td></tr>
+    <tr><td style="color:#a78bfa">purple</td><td>#a78bfa</td><td>parked VT, scheduler, heap/continuations</td></tr>
+    <tr><td style="color:#f5b84c">amber</td><td>#f5b84c</td><td>OS/CPU layer, core emissive (0.2+heat·0.9)</td></tr>
+    <tr><td style="color:#f87171">red</td><td>#f87171</td><td>pinned carrier + its VT, PINNED label</td></tr>
+    <tr><td style="color:#e6edf3">white</td><td>#e6edf3</td><td>completed VT in flight, headline text</td></tr>
+    <tr><td style="color:#8ea2b8">bg/chrome</td><td>#070b12 · #0d1520 · #1a2735</td><td>scene background/fog, HUD cards, borders</td></tr>
+  </table>
+
+  <h2 id="fsm" style="font-size:20px;margin:0 0 12px;color:#a78bfa">3 · State Machine &amp; Timing</h2>
+  <pre style="margin-bottom:14px">toQueue ──→ queued ──→ mounting ──→ running ──┬──→ done ──→ dead (recycled)
+   ↑ (resume, resumed=true)                    ├──→ parking ──→ parked ──→ toQueue
+   └───────────────────────────────────────────┘    (pin: flag on Carrier, not a VT state)</pre>
+  <table style="margin-bottom:14px">
+    <tr><th style="width:250px">EVENT / PARAMETER</th><th style="width:200px">VALUE</th><th>NOTES</th></tr>
+    <tr><td>Tick</td><td>dt = min(0.05, frameΔ)·speed</td><td>speed default 0.75, slider 0.25–3.0 step 0.25</td></tr>
+    <tr><td>Boot sequence</td><td>3.0 s, layers rise staggered 0.5 s, over 0.5 s each</td><td>rise offset 18 units; then auto-enter Chapter 2 (MOUNT)</td></tr>
+    <tr><td>Spawn rate (free run)</td><td>1.4 task/s, ≤6 spawns/frame, cap maxThreads=500</td><td>burst button adds +25</td></tr>
+    <tr><td>Work per VT</td><td>1.6 + rnd·2.8 s</td><td>progress = 1 − work/work0</td></tr>
+    <tr><td>Park probability</td><td>0.30·dt while running, once per VT</td><td>resumed VTs never re-park (keeps flow legible)</td></tr>
+    <tr><td>Parked I/O wait</td><td>1.8 + rnd·3.0 s</td><td>then unshift to queue head, resumed=true</td></tr>
+    <tr><td>Pin probability / duration</td><td>0.03·dt / 2.6 + rnd·1.2 s</td><td>work frozen while pinned; carrier heat stays hot</td></tr>
+    <tr><td>Tween durations</td><td>spawn→queue 0.7 · mount 0.55 · park 0.85 · resume 0.85 · exit 0.8 s</td><td>smoothstep e=t²(3−2t), arc: +sin(πe)·(8+rnd·10) on Y</td></tr>
+    <tr><td>Idle drift to slot</td><td>pos += (target−pos)·min(1, 4·dt)</td><td>queued + parked reflow when indices shift</td></tr>
+    <tr><td>Flash decay / log</td><td>opacity = max(0, 1 − age/1.6) · log keeps 9 lines</td><td>HUD sync at ~6 Hz, not every frame</td></tr>
+  </table>
+  <table style="margin-bottom:36px">
+    <tr><th style="width:60px">CH</th><th style="width:90px">TITLE</th><th style="width:250px">ON ENTER</th><th>CAMERA PRESET (θ, φ, dist, targetY)</th></tr>
+    <tr><td>1</td><td>BOOT</td><td>reset sim, boot=0</td><td>overview (0.65, 1.12, 260, 45)</td></tr>
+    <tr><td>2</td><td>MOUNT</td><td>burst +6, chaos off</td><td>carriers (0.35, 1.25, 150, 30)</td></tr>
+    <tr><td>3</td><td>PARK</td><td>pendingPark=true (next running VT parks)</td><td>heap (−0.55, 1.15, 170, 45)</td></tr>
+    <tr><td>4</td><td>RESUME</td><td>clamp a parked VT's io ≤ 0.8 s</td><td>carriers</td></tr>
+    <tr><td>5</td><td>PINNED</td><td>pendingPin=true</td><td>carriers</td></tr>
+    <tr><td>6</td><td>SCALE</td><td>burst to 500, chaos on</td><td>overview · TOP preset = (0.65, 0.35, 300, 40)</td></tr>
+  </table>
+
+  <h2 id="hud" style="font-size:20px;margin:0 0 12px;color:#f5b84c">4 · HUD &amp; Controls</h2>
+  <table style="margin-bottom:14px">
+    <tr><th style="width:220px">REGION</th><th>SPEC</th></tr>
+    <tr><td>Header</td><td>Pulsing green LED (1.6 s), title, GUIDED/FREE RUN toggle (ToggleGroup), status text BOOTING/RUNNING/PAUSED</td></tr>
+    <tr><td>Right sidebar 290px</td><td>Counters grid 2×2 (RUNNABLE green, MOUNTED blue, PARKED purple, COMPLETED white) · 4 key-behavior cards whose backgrounds flash on event · event log, 9 mono lines "047s VT-12 parked · carrier released"</td></tr>
+    <tr><td>Narration card</td><td>Bottom-left 400px overlay: CHAPTER n/6, colored title, body text, ←/Next buttons. Chapter copy: reuse the six paragraphs from the HTML sim verbatim</td></tr>
+    <tr><td>Bottom bar</td><td>Pause/Run · +25 tasks · Force park · Force pin · speed Slider + readout "0.75×"</td></tr>
+    <tr><td>Keyboard</td><td>SPACE play/pause · ←/→ chapters · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480)</td></tr>
+    <tr><td>Hover tooltip</td><td>PickResult on the VT pool → "VT-42 · running on C2 · 63% done"; offset (+14, +10) from cursor</td></tr>
+  </table>
+  <div style="font-size:12.5px;color:#8ea2b8;margin-bottom:36px">Type: Space Grotesk (UI) + IBM Plex Mono (data). Ship both as bundled TTFs via <code>Font.loadFont</code> — don't depend on system fonts on the conference machine.</div>
+
+  <h2 id="map" style="font-size:20px;margin:0 0 12px;color:#f87171">5 · Web → JavaFX Mapping</h2>
+  <table style="margin-bottom:36px">
+    <tr><th style="width:250px">WEB SIM (three.js)</th><th>JAVAFX EQUIVALENT</th></tr>
+    <tr><td>requestAnimationFrame loop</td><td><code>AnimationTimer.handle(nowNanos)</code> — compute dt yourself, same 0.05 s clamp</td></tr>
+    <tr><td>WebGLRenderer + Scene</td><td><code>SubScene(world, w, h, true, SceneAntialiasing.BALANCED)</code>, fill #070b12. No fog — approximate with far-plane 1000 and the dark bg</td></tr>
+    <tr><td>InstancedMesh (500 spheres)</td><td>No instancing. Pre-allocate a pool of 540 <code>Sphere(1.9)</code>, toggle <code>visible</code>. Share exactly 6 <code>PhongMaterial</code>s (one per color) — never one material per node</td></tr>
+    <tr><td>Additive glow shells</td><td>No additive blending. Second pool of <code>Sphere(3.6)</code> with 22%-opacity self-illuminated material; accept the softer look, or skip glow — the dark bg carries it</td></tr>
+    <tr><td>emissiveIntensity pulse on cores</td><td>Swap between 4–5 pre-baked <code>selfIlluminationMap</code> brightness levels, or lerp <code>diffuseColor</code> toward white by heat</td></tr>
+    <tr><td>CanvasTexture text sprites</td><td>2D <code>Label</code>s in an overlay Pane, repositioned each frame via <code>node.localToScene(0,0,0)</code> projection (§6.4). FXyz3D <code>Text3DMesh</code> only for the big layer titles if you want true 3D type</td></tr>
+    <tr><td>Hero trail (vertex-colored Line)</td><td>FXyz3D <code>PolyLine3D</code> rebuilt each frame from the 36-point ring buffer, or 36 tiny pooled spheres with decaying opacity</td></tr>
+    <tr><td>Torus / edges</td><td>FXyz3D <code>TorusMesh</code>; slab edges = 12 thin Box strips per slab (JavaFX has no wireframe overlay)</td></tr>
+    <tr><td>Orbit math</td><td>Identical spherical formula on a <code>Translate(target) → Rotate(Y,θ) → Rotate(X,φ) → Translate(0,0,−dist)</code> camera rig</td></tr>
+    <tr><td>Raycast hover</td><td>Free: <code>setOnMouseMoved</code> + <code>event.getPickResult().getIntersectedNode()</code>; map node→Vt in an IdentityHashMap</td></tr>
+  </table>
+
+  <h2 id="code" style="font-size:20px;margin:0 0 12px;color:#e6edf3">6 · Key Snippets (Java 25)</h2>
+  <div style="font-size:13px;color:#8ea2b8;margin-bottom:8px">6.1 · Main loop</div>
+  <pre style="margin-bottom:18px">new AnimationTimer() {
+    long last = -1;
+    @Override public void handle(long now) {
+        double dt = last < 0 ? 0 : Math.min(0.05, (now - last) / 1e9);
+        last = now;
+        if (sim.running()) sim.tick(dt * sim.speed());
+        scene.sync(sim);           // move pooled nodes, colors, trail
+        if (++frame % 10 == 0) hud.sync(sim);   // ~6 Hz is plenty
+    }
+}.start();</pre>
+  <div style="font-size:13px;color:#8ea2b8;margin-bottom:8px">6.2 · Camera rig (matches web presets exactly)</div>
+  <pre style="margin-bottom:18px">// world is wrapped in new Scale(1, -1, 1), so Y-up math carries over
+void apply(double th, double ph, double d, double ty) {
+    double x = Math.sin(th) * Math.sin(ph) * d;
+    double y = Math.cos(ph) * d + ty;
+    double z = Math.cos(th) * Math.sin(ph) * d;
+    camera.getTransforms().setAll(
+        new Translate(x, -y, z),                       // note negated Y
+        lookAt(new Point3D(x, -y, z), new Point3D(0, -ty, 0)));
+}</pre>
+  <div style="font-size:13px;color:#8ea2b8;margin-bottom:8px">6.3 · Shared materials + node pool</div>
+  <pre style="margin-bottom:18px">static final PhongMaterial GREEN = mat("#34d399"), BLUE = mat("#60a5fa"),
+    PURPLE = mat("#a78bfa"), RED = mat("#f87171"), WHITE = mat("#e6edf3");
+
+static PhongMaterial mat(String hex) {
+    var m = new PhongMaterial(Color.web(hex));
+    m.setSpecularColor(Color.web(hex).brighter());
+    return m;
+}
+// pool: List&lt;Sphere&gt; of size cap; sync() walks sim.vts(),
+// assigns sphere[i].setTranslate…, setMaterial(byState), setVisible(true),
+// then hides the rest. Never allocate nodes mid-frame.</pre>
+  <div style="font-size:13px;color:#8ea2b8;margin-bottom:8px">6.4 · Projecting 3D anchors for 2D labels</div>
+  <pre style="margin-bottom:18px">Point3D p = anchorNode.localToScene(0, 0, 0, true);  // scene coords
+label.relocate(p.getX() - label.getWidth() / 2, p.getY() - 28);
+// call for each visible label inside the AnimationTimer, after sync()</pre>
+  <div style="font-size:13px;color:#8ea2b8;margin-bottom:8px">6.5 · Driving the model with real virtual threads (the demo flex)</div>
+  <pre style="margin-bottom:18px">try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
+    for (int i = 0; i < 500; i++) {
+        exec.submit(() -> {
+            long id = Thread.currentThread().threadId();
+            sim.post(new Spawned(id));
+            work();                                  // CPU slice → running
+            sim.post(new Parked(id));
+            Thread.sleep(Duration.ofMillis(1800 + rnd(3000)));  // real park!
+            sim.post(new Resumed(id));
+            work();
+            sim.post(new Completed(id));
+        });
+    }
+}
+// sim.post() enqueues onto a ConcurrentLinkedQueue drained by tick();
+// carrier lanes then show REAL mounts: read carrier id via
+// jdk.internal tracking or JFR jdk.VirtualThreadPinned events for §PINNED</pre>
+  <div style="font-size:12.5px;color:#8ea2b8">Run with <code>--enable-preview</code> not needed on 25 — virtual threads are final since 21. For the PINNED chapter with real threads, trigger it honestly: <code>synchronized (lock) { Thread.sleep(...); }</code> on Java ≤23 pins; on 24+ (JEP 491) synchronized no longer pins, so demo pinning via a native call or <code>Object.wait()</code> inside a monitor — worth saying out loud in the talk.</div>
+</div>
+</div>
+</x-dc>
+</body>
+</html>

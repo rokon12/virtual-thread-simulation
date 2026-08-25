@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.184.0/build/three.module.js",
+    "three/addons/controls/OrbitControls.js": "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js",
+    "three/addons/exporters/OBJExporter.js": "https://unpkg.com/three@0.184.0/examples/jsm/exporters/OBJExporter.js",
+    "three/addons/exporters/GLTFExporter.js": "https://unpkg.com/three@0.184.0/examples/jsm/exporters/GLTFExporter.js"
+  },
+  "integrity": {
+    "https://unpkg.com/three@0.184.0/build/three.module.js": "sha384-8FCZ1eVO6it4+pbec2aDtnTrwjWXZLJRC+MAGCIPDgsYnUrl/E0A2YlF8ioMKI/J",
+    "https://unpkg.com/three@0.184.0/build/three.core.js": "sha384-dw2ooPewaEIrAgl6oFDBmmBWCE9oW9LxRGcfwZ0hLvEprzo202wXl7vCYHRlSnOT",
+    "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js": "sha384-4rziNxOBZKQ69i+w+f89KJ55TCYquwchVbByQwmaOeIOXdOU2PLDn3kOfXHwIJC9",
+    "https://unpkg.com/three@0.184.0/examples/jsm/exporters/OBJExporter.js": "sha384-nbwtoZENJD3Vq+ACK0CuGQdPMuDWHkamC2KJD70EV5nfg6jQjfppKOea07YJN+N3",
+    "https://unpkg.com/three@0.184.0/examples/jsm/exporters/GLTFExporter.js": "sha384-VofkvpG6HERhFCYbsUOHeNXBCqID2nfqkQqnVzE1jc/oPcz+qJ13ADdXH08hE+cQ"
+  }
+}
+</script>
+<script type="module">import * as THREE from 'three'; window.THREE = THREE;</script>
+<style>
+html,body{margin:0;padding:0;background:#070b12;height:100%;overflow:hidden}
+*{box-sizing:border-box}
+a{color:#6ee7b7;text-decoration:none}a:hover{color:#a7f3d0}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+input[type=range]{accent-color:#34d399}
+</style>
+</helmet>
+<div style="height:100vh;display:flex;flex-direction:column;font-family:'Space Grotesk',sans-serif;color:#e6edf3;background:#070b12">
+  <div style="display:flex;align-items:center;gap:14px;padding:12px 22px;border-bottom:1px solid #141f2c" data-screen-label="Header">
+    <div style="width:10px;height:10px;border-radius:50%;background:#34d399;box-shadow:0 0 12px #34d399;animation:led 1.6s infinite"></div>
+    <div>
+      <div style="font-size:19px;font-weight:700;letter-spacing:.04em">THE VIRTUAL THREAD MACHINE</div>
+      <div style="font-size:12px;color:#7d8fa3">Mount · Park · Resume · Pin — 500 virtual threads on 4 carriers, live in 3D</div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <button onClick="{{ setGuided }}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 12px;border-radius:7px;cursor:pointer;border:1px solid {{ guidedBorder }};background:{{ guidedBg }};color:{{ guidedFg }}">GUIDED</button>
+      <button onClick="{{ setFree }}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 12px;border-radius:7px;cursor:pointer;border:1px solid {{ freeBorder }};background:{{ freeBg }};color:{{ freeFg }}">FREE RUN</button>
+    </div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.12em;color:#34d399;width:86px;text-align:right">{{ statusText }}</div>
+  </div>
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="flex:1;position:relative;min-width:0">
+      <div ref="{{ mountRef }}" style="position:absolute;inset:0;cursor:grab"></div>
+      <div ref="{{ tipRef }}" style="position:absolute;display:none;pointer-events:none;background:rgba(10,16,25,.92);border:1px solid #2a3b52;border-radius:6px;padding:5px 9px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#cfe0f2;white-space:nowrap;z-index:5"></div>
+      <div style="position:absolute;right:16px;bottom:16px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5c7089;letter-spacing:.06em">SPACE play/pause · ← → chapters · 1–4 cameras · drag to orbit · scroll to zoom</div>
+      <div style="position:absolute;left:16px;bottom:16px;width:400px;background:rgba(10,16,25,.88);border:1px solid #1d2b3c;border-radius:12px;padding:14px 16px;backdrop-filter:blur(6px)" data-screen-label="Narration">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#7d8fa3">CHAPTER {{ chapNum }}/6</div>
+          <div style="font-size:17px;font-weight:700;color:{{ chapColor }}">{{ chapTitle }}</div>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <button onClick="{{ prevChap }}" style="font-family:'Space Grotesk',sans-serif;width:30px;height:26px;border-radius:6px;border:1px solid #26364a;background:#0e1826;color:#9db2c8;cursor:pointer">←</button>
+            <button onClick="{{ nextChap }}" style="font-family:'Space Grotesk',sans-serif;height:26px;padding:0 12px;border-radius:6px;border:1px solid #2a5c48;background:#0f2b21;color:#6ee7b7;cursor:pointer;font-weight:500">Next →</button>
+          </div>
+        </div>
+        <div style="font-size:14px;line-height:1.55;color:#b6c6d8;text-wrap:pretty">{{ chapText }}</div>
+      </div>
+      <div style="position:absolute;right:16px;top:14px;display:flex;gap:6px" data-screen-label="Camera presets">
+        <button onClick="{{ camOverview }}" style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:5px 10px;border-radius:6px;border:1px solid #26364a;background:rgba(14,24,38,.8);color:#9db2c8;cursor:pointer">OVERVIEW</button>
+        <button onClick="{{ camCarriers }}" style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:5px 10px;border-radius:6px;border:1px solid #26364a;background:rgba(14,24,38,.8);color:#9db2c8;cursor:pointer">CARRIERS</button>
+        <button onClick="{{ camHeap }}" style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:5px 10px;border-radius:6px;border:1px solid #26364a;background:rgba(14,24,38,.8);color:#9db2c8;cursor:pointer">HEAP</button>
+        <button onClick="{{ camTop }}" style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:5px 10px;border-radius:6px;border:1px solid #26364a;background:rgba(14,24,38,.8);color:#9db2c8;cursor:pointer">TOP</button>
+      </div>
+    </div>
+    <div style="width:290px;border-left:1px solid #141f2c;padding:12px 14px;display:flex;flex-direction:column;gap:12px;overflow-y:auto" data-screen-label="Sidebar">
+      <div>
+        <div style="font-size:11px;letter-spacing:.16em;color:#7d8fa3;margin-bottom:8px">LIVE COUNTERS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-family:'IBM Plex Mono',monospace">
+          <div style="background:#0d1520;border:1px solid #1a2735;border-radius:8px;padding:8px 10px"><div style="font-size:22px;color:#34d399">{{ stats.runnable }}</div><div style="font-size:10px;color:#7d8fa3">RUNNABLE</div></div>
+          <div style="background:#0d1520;border:1px solid #1a2735;border-radius:8px;padding:8px 10px"><div style="font-size:22px;color:#60a5fa">{{ stats.mounted }}</div><div style="font-size:10px;color:#7d8fa3">MOUNTED</div></div>
+          <div style="background:#0d1520;border:1px solid #1a2735;border-radius:8px;padding:8px 10px"><div style="font-size:22px;color:#a78bfa">{{ stats.parked }}</div><div style="font-size:10px;color:#7d8fa3">PARKED</div></div>
+          <div style="background:#0d1520;border:1px solid #1a2735;border-radius:8px;padding:8px 10px"><div style="font-size:22px;color:#e6edf3">{{ stats.completed }}</div><div style="font-size:10px;color:#7d8fa3">COMPLETED</div></div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <div style="font-size:11px;letter-spacing:.16em;color:#7d8fa3">KEY BEHAVIORS</div>
+        <div style="position:relative;border:1px solid #1a2735;border-radius:8px;padding:8px 11px;background:#0d1520">
+          <div style="position:absolute;inset:0;border-radius:8px;background:rgba(96,165,250,.16);opacity:{{ fMount }};transition:opacity .35s"></div>
+          <div style="font-size:14px;font-weight:500;color:#60a5fa">1 · Mount</div>
+          <div style="font-size:12px;color:#8ea2b8">Runnable VT mounts on a free carrier thread.</div>
+        </div>
+        <div style="position:relative;border:1px solid #1a2735;border-radius:8px;padding:8px 11px;background:#0d1520">
+          <div style="position:absolute;inset:0;border-radius:8px;background:rgba(167,139,250,.16);opacity:{{ fPark }};transition:opacity .35s"></div>
+          <div style="font-size:14px;font-weight:500;color:#a78bfa">2 · Park</div>
+          <div style="font-size:12px;color:#8ea2b8">Blocking I/O unmounts the VT; continuation stored on the heap, carrier released.</div>
+        </div>
+        <div style="position:relative;border:1px solid #1a2735;border-radius:8px;padding:8px 11px;background:#0d1520">
+          <div style="position:absolute;inset:0;border-radius:8px;background:rgba(52,211,153,.16);opacity:{{ fResume }};transition:opacity .35s"></div>
+          <div style="font-size:14px;font-weight:500;color:#34d399">3 · Resume</div>
+          <div style="font-size:12px;color:#8ea2b8">I/O done; VT remounts on any free carrier.</div>
+        </div>
+        <div style="position:relative;border:1px solid #1a2735;border-radius:8px;padding:8px 11px;background:#0d1520">
+          <div style="position:absolute;inset:0;border-radius:8px;background:rgba(248,113,113,.18);opacity:{{ fPin }};transition:opacity .35s"></div>
+          <div style="font-size:14px;font-weight:500;color:#f87171">4 · Pinned</div>
+          <div style="font-size:12px;color:#8ea2b8">Blocking in synchronized/native code pins the carrier — it can't be released.</div>
+        </div>
+      </div>
+      <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+        <div style="font-size:11px;letter-spacing:.16em;color:#7d8fa3;margin-bottom:6px">EVENT LOG</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.75;color:#9db2c8;overflow:hidden">
+          <sc-for list="{{ feed }}" as="line" hint-placeholder-count="3">
+            <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ line }}</div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;padding:10px 22px;border-top:1px solid #141f2c" data-screen-label="Controls">
+    <button onClick="{{ toggleRun }}" style="font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:500;padding:8px 18px;border-radius:8px;border:1px solid #2a5c48;background:#0f2b21;color:#6ee7b7;cursor:pointer;width:90px">{{ playLabel }}</button>
+    <button onClick="{{ burst }}" style="font-family:'Space Grotesk',sans-serif;font-size:13px;padding:8px 14px;border-radius:8px;border:1px solid #24425f;background:#0f1e30;color:#93c5fd;cursor:pointer">+25 tasks</button>
+    <button onClick="{{ forcePark }}" style="font-family:'Space Grotesk',sans-serif;font-size:13px;padding:8px 14px;border-radius:8px;border:1px solid #3d3564;background:#191531;color:#c4b5fd;cursor:pointer">Force park</button>
+    <button onClick="{{ forcePin }}" style="font-family:'Space Grotesk',sans-serif;font-size:13px;padding:8px 14px;border-radius:8px;border:1px solid #5c2a2a;background:#2b0f0f;color:#fca5a5;cursor:pointer">Force pin</button>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:10px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#7d8fa3">
+      <span>SPEED</span>
+      <input type="range" min="0.25" max="3" step="0.25" defaultValue="0.75" onChange="{{ onSpeed }}" style="width:130px">
+      <span style="color:#e6edf3;width:44px">{{ speedLabel }}</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;carriers&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:4,&quot;min&quot;:2,&quot;max&quot;:6,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;},&quot;maxThreads&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:500,&quot;min&quot;:50,&quot;max&quot;:800,&quot;step&quot;:50,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;},&quot;taskRate&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1.4,&quot;min&quot;:0.3,&quot;max&quot;:6,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;tasks/s&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;}}">
+class Component extends DCLogic {
+  state = { stats:{runnable:0,mounted:0,parked:0,completed:0}, feed:['— boot sequence initiated —'], fMount:0,fPark:0,fResume:0,fPin:0,
+    statusText:'BOOTING', playLabel:'Pause', speedLabel:'0.75×', chap:0, mode:'guided' };
+  CHAPTERS = [
+    {t:'BOOT', c:'#f5b84c', n:'Power on. Four OS threads light up on the CPU cores; the JVM starts a matching pool of carrier (platform) threads, and the ForkJoinPool scheduler spins up above them. This small machine is all the OS ever sees.'},
+    {t:'MOUNT', c:'#60a5fa', n:'Application tasks arrive and become virtual threads — cheap, JVM-managed objects on the runnable deck. The scheduler mounts each runnable VT onto a free carrier; only while mounted does a VT consume an OS thread.'},
+    {t:'PARK', c:'#a78bfa', n:'A VT hits blocking I/O. Instead of blocking its OS thread, it unmounts: its stack and continuation are copied to the heap tower, and the carrier is instantly free to run another VT.'},
+    {t:'RESUME', c:'#34d399', n:'The I/O completes. The stored continuation makes the VT runnable again and it remounts on ANY free carrier — not necessarily the one it left. Watch it land on a different slot.'},
+    {t:'PINNED', c:'#f87171', n:'The failure mode: blocking inside a synchronized block or native call pins the VT to its carrier. The slot locks red — that carrier cannot be released until the pin ends. This is the one case that still wastes an OS thread.'},
+    {t:'SCALE', c:'#e6edf3', n:'The payoff. 500 virtual threads flood in and the machine does not grow: 4 carriers multiplex all of them, parked threads costing only heap memory. Thousands of concurrent tasks, a handful of OS threads.'}];
+  renderVals(){
+    this.mountRef = this.mountRef || React.createRef();
+    this.tipRef = this.tipRef || React.createRef();
+    const st=this.state, ch=this.CHAPTERS[st.chap], g=st.mode==='guided';
+    return { mountRef:this.mountRef, tipRef:this.tipRef, stats:st.stats, feed:st.feed, fMount:st.fMount, fPark:st.fPark, fResume:st.fResume, fPin:st.fPin,
+      statusText:st.statusText, playLabel:st.playLabel, speedLabel:st.speedLabel,
+      chapNum:st.chap+1, chapTitle:ch.t, chapText:ch.n, chapColor:ch.c,
+      guidedBg:g?'#0f2b21':'#0e1826', guidedFg:g?'#6ee7b7':'#7d8fa3', guidedBorder:g?'#2a5c48':'#26364a',
+      freeBg:g?'#0e1826':'#0f2b21', freeFg:g?'#7d8fa3':'#6ee7b7', freeBorder:g?'#26364a':'#2a5c48',
+      setGuided:()=>this.setMode('guided'), setFree:()=>this.setMode('free'),
+      prevChap:()=>this.gotoChap(st.chap-1), nextChap:()=>this.gotoChap(st.chap+1),
+      camOverview:()=>this.camTo('overview'), camCarriers:()=>this.camTo('carriers'), camHeap:()=>this.camTo('heap'), camTop:()=>this.camTo('top'),
+      toggleRun:()=>{ const s=this.sim; s.running=!s.running; this.setState({playLabel:s.running?'Pause':'Run', statusText:s.running?'RUNNING':'PAUSED'}); },
+      burst:()=>{ this.sim.burst+=25; this.log('burst: 25 tasks submitted'); },
+      forcePark:()=>{ const v=this.sim.vts.find(v=>v.state==='running'&&!v.carrier.pinT); if(v) this.park(v); else this.log('no unpinned running VT'); },
+      forcePin:()=>{ const v=this.sim.vts.find(v=>v.state==='running'&&!v.carrier.pinT); if(v) this.pin(v); else this.log('no running VT'); },
+      onSpeed:(e)=>{ this.sim.speed=parseFloat(e.target.value); this.setState({speedLabel:this.sim.speed.toFixed(2)+'×'}); } };
+  }
+  log(m){ const s=this.sim; s.feed.unshift(('00'+Math.floor(s.t)).slice(-3)+'s '+m); s.feed=s.feed.slice(0,9); }
+  flash(k){ this.sim.flash[k]=this.sim.t; }
+  setMode(m){ this.setState({mode:m}); const s=this.sim; s.mode=m;
+    if(m==='free'){ s.chaos=true; s.spawnRate=this.props.taskRate??1.4; this.log('free run: continuous load'); }
+    else { s.chaos=false; s.spawnRate=0; this.log('guided mode'); } }
+  gotoChap(i){ const N=this.CHAPTERS.length; i=((i%N)+N)%N; this.setState({chap:i,mode:'guided'});
+    const s=this.sim; s.mode='guided'; s.chaos=false; s.spawnRate=0; s.pendingPark=false; s.pendingPin=false;
+    if(i===0){ this.resetSim(); this.camTo('overview'); }
+    if(i===1){ s.burst+=6; this.camTo('carriers'); this.log('chapter: mount'); }
+    if(i===2){ if(!s.vts.some(v=>v.state==='running')) s.burst+=4; s.pendingPark=true; this.camTo('heap'); this.log('chapter: park'); }
+    if(i===3){ const p=s.vts.find(v=>v.state==='parked'); if(p) p.io=Math.min(p.io,0.8); else { s.burst+=2; s.pendingPark=true; } this.camTo('carriers'); this.log('chapter: resume'); }
+    if(i===4){ if(!s.vts.some(v=>v.state==='running')) s.burst+=4; s.pendingPin=true; this.camTo('carriers'); this.log('chapter: pinned'); }
+    if(i===5){ s.burst+=(this.props.maxThreads??500)-s.vts.length; s.chaos=true; this.camTo('overview'); this.log('chapter: scale — flooding tasks'); } }
+  resetSim(){ const C=Math.max(2,Math.min(6,this.props.carriers??4));
+    this.sim=Object.assign(this.sim||{},{ t:0, boot:0, running:true, speed:this.sim?this.sim.speed:0.75, hero:null, vts:[], queue:[], nextId:1, spawnAcc:0, burst:0, completed:0,
+      spawnRate:0, chaos:false, mode:'guided', pendingPark:false, pendingPin:false,
+      flash:{mount:-9,park:-9,resume:-9,pin:-9}, feed:['boot: power on'],
+      carriers:Array.from({length:C},()=>({vt:null,pinT:0,heat:0})) });
+    this.setState({statusText:'BOOTING'}); }
+  // ---- geometry helpers (world coords, y up) ----
+  laneX(i){ const C=this.sim.carriers.length; return (i-(C-1)/2)*26; }
+  queueSlot(i){ const a=i*0.55, r=7+2.6*Math.sqrt(i); return {x:Math.cos(a)*r*1.7, y:80.5, z:Math.sin(a)*r*0.62}; }
+  storeSlot(i){ const l=Math.floor(i/25), j=i%25; return {x:118+(j%5-2)*6.4, y:34+l*6.4, z:(Math.floor(j/5)-2)*6.4}; }
+  animTo(vt,to,dur,done){ vt.anim={from:{...vt.pos},to,t:0,dur,done,arc:8+Math.random()*10}; }
+  spawn(){ const s=this.sim;
+    const vt={ id:s.nextId++, state:'toQueue', pos:{x:-130+Math.random()*20-10, y:105+Math.random()*12, z:Math.random()*20-10}, work0:0, work:0, io:0, carrier:null, resumed:false };
+    vt.work0=vt.work=1.6+Math.random()*2.8;
+    if(!s.hero){ vt.hero=true; s.hero=vt; }
+    this.animTo(vt,this.queueSlot(s.queue.length),0.7,()=>{vt.state='queued';});
+    s.queue.push(vt); s.vts.push(vt); }
+  park(vt){ const s=this.sim; vt.carrier.vt=null; vt.carrier=null; vt.state='parking'; vt.io=1.8+Math.random()*3;
+    const n=s.vts.filter(v=>v.state==='parked'||v.state==='parking').length;
+    this.animTo(vt,this.storeSlot(n),0.85,()=>{vt.state='parked';});
+    this.flash('park'); this.log('VT-'+vt.id+' parked · carrier released'); }
+  pin(vt){ vt.carrier.pinT=2.6+Math.random()*1.2; this.flash('pin'); this.log('VT-'+vt.id+' PINNED on C'+(this.sim.carriers.indexOf(vt.carrier)+1)); }
+  tick(dt){ const s=this.sim, cap=this.props.maxThreads??500;
+    s.spawnAcc+=s.spawnRate*dt; let n=0;
+    while((s.spawnAcc>=1||s.burst>0)&&s.vts.length<cap+20&&n<6){ if(s.burst>0)s.burst--; else s.spawnAcc-=1; this.spawn(); n++; }
+    for(const vt of s.vts){ const a=vt.anim; if(a){ a.t+=dt/a.dur; const t=Math.min(1,a.t), e=t*t*(3-2*t);
+      vt.pos={ x:a.from.x+(a.to.x-a.from.x)*e, y:a.from.y+(a.to.y-a.from.y)*e+Math.sin(Math.PI*e)*a.arc, z:a.from.z+(a.to.z-a.from.z)*e };
+      if(t>=1){ vt.anim=null; a.done&&a.done(); } } }
+    s.queue.forEach((vt,i)=>{ if(vt.state==='queued'&&!vt.anim){ const tg=this.queueSlot(i), k=Math.min(1,dt*4);
+      vt.pos.x+=(tg.x-vt.pos.x)*k; vt.pos.y+=(tg.y-vt.pos.y)*k; vt.pos.z+=(tg.z-vt.pos.z)*k; } });
+    s.carriers.forEach((c,i)=>{ c.heat=Math.max(0,c.heat-dt*0.8);
+      if(c.pinT>0){ c.pinT-=dt; if(c.pinT<=0){ c.pinT=0; if(c.vt) this.log('VT-'+c.vt.id+' unpinned · resumes'); } }
+      if(!c.vt){ const idx=s.queue.findIndex(v=>v.state==='queued'&&!v.anim); if(idx>=0){ const vt=s.queue.splice(idx,1)[0];
+        c.vt=vt; vt.carrier=c; vt.state='mounting';
+        this.animTo(vt,{x:this.laneX(i),y:30,z:0},0.55,()=>{vt.state='running';});
+        this.flash('mount'); this.log('VT-'+vt.id+(vt.resumed?' resumed on C':' mounted on C')+(i+1)); } } });
+    for(const vt of [...s.vts]){
+      if(vt.state==='running'){ const c=vt.carrier; c.heat=Math.min(1,c.heat+dt*2);
+        if(s.pendingPark){ s.pendingPark=false; this.park(vt); continue; }
+        if(s.pendingPin){ s.pendingPin=false; this.pin(vt); }
+        if(c.pinT>0) continue;
+        vt.work-=dt;
+        if(s.chaos&&vt.work>0.4){ const r=Math.random();
+          if(!vt.resumed&&r<dt*0.30) { this.park(vt); continue; }
+          else if(r>1-dt*0.03) this.pin(vt); }
+        if(vt.work<=0){ const i=s.carriers.indexOf(c); c.vt=null; vt.carrier=null; vt.state='done';
+          this.animTo(vt,{x:150,y:-14,z:40},0.8,()=>{vt.state='dead';});
+          s.completed++; this.log('VT-'+vt.id+' completed · C'+(i+1)+' free'); }
+      } else if(vt.state==='parked'){ vt.io-=dt;
+        if(vt.io<=0){ vt.state='toQueue'; vt.resumed=true; s.queue.unshift(vt);
+          this.animTo(vt,this.queueSlot(0),0.85,()=>{vt.state='queued';});
+          this.flash('resume'); this.log('VT-'+vt.id+' I/O done · runnable'); } } }
+    s.vts=s.vts.filter(v=>v.state!=='dead');
+    if(s.hero&&s.hero.state==='dead') s.hero=null;
+    let pi=0; for(const vt of s.vts) if(vt.state==='parked'&&!vt.anim){ const tg=this.storeSlot(pi++), k=Math.min(1,dt*4);
+      vt.pos.x+=(tg.x-vt.pos.x)*k; vt.pos.y+=(tg.y-vt.pos.y)*k; vt.pos.z+=(tg.z-vt.pos.z)*k; }
+  }
+  sync(){ const s=this.sim, f=k=>Math.max(0,1-(s.t-s.flash[k])/1.6);
+    this.setState({ stats:{ runnable:s.queue.length, mounted:s.carriers.filter(c=>c.vt).length, parked:s.vts.filter(v=>v.state==='parked'||v.state==='parking').length, completed:s.completed },
+      feed:[...s.feed], fMount:f('mount'), fPark:f('park'), fResume:f('resume'), fPin:f('pin') }); }
+  // ---- three.js scene ----
+  camTo(name){ const P={ overview:{th:0.65,ph:1.12,d:260,ty:45}, carriers:{th:0.35,ph:1.25,d:150,ty:30}, heap:{th:-0.55,ph:1.15,d:170,ty:45}, top:{th:0.65,ph:0.35,d:300,ty:40} }[name];
+    this.camGoal={...P}; }
+  buildScene(){ const T=window.THREE, mnt=this.mountRef.current;
+    const W=mnt.clientWidth, H=mnt.clientHeight;
+    const renderer=this.renderer=new T.WebGLRenderer({antialias:true}); renderer.setPixelRatio(Math.min(2,window.devicePixelRatio)); renderer.setSize(W,H); mnt.appendChild(renderer.domElement);
+    const scene=this.scene=new T.Scene(); scene.background=new T.Color(0x070b12); scene.fog=new T.Fog(0x070b12,320,560);
+    this.camera=new T.PerspectiveCamera(45,W/H,1,1000);
+    this.orbit={th:0.65,ph:1.12,d:260,ty:45}; this.camGoal=null;
+    scene.add(new T.AmbientLight(0x8899bb,0.55));
+    const key=new T.DirectionalLight(0xffffff,0.75); key.position.set(80,180,120); scene.add(key);
+    const rim=new T.PointLight(0x60a5fa,0.5,400); rim.position.set(-120,80,-80); scene.add(rim);
+    const slab=(w,d,y,color,edge,label,lx)=>{ const g=new T.Group();
+      const m=new T.Mesh(new T.BoxGeometry(w,3.5,d), new T.MeshLambertMaterial({color,transparent:true,opacity:0.92}));
+      const e=new T.LineSegments(new T.EdgesGeometry(m.geometry), new T.LineBasicMaterial({color:edge}));
+      g.add(m); g.add(e); g.position.y=y; scene.add(g);
+      if(label){ const sp=this.textSprite(label,edge); sp.position.set(lx??-w/2-6,y+7,0); sp.center=new T.Vector2(1,0.5); scene.add(sp); }
+      return g; };
+    this.layers=[];
+    this.layers.push(slab(150,64,0,0x1c1508,0xf5b84c,'OS THREADS / CPU CORES'));      // 0
+    this.layers.push(slab(150,56,26,0x0a1626,0x60a5fa,'CARRIER THREADS'));            // 1
+    this.layers.push(slab(150,50,52,0x150f2b,0xa78bfa,'SCHEDULER · ForkJoinPool'));   // 2
+    this.layers.push(slab(170,66,78,0x0a2018,0x34d399,'VIRTUAL THREADS · runnable')); // 3
+    // heap tower base
+    const heap=slab(40,40,30,0x171129,0xa78bfa,null); heap.position.x=118; this.layers.push(heap);
+    const hl=this.textSprite('CONTINUATION SNAPSHOTS · heap',0xa78bfa); hl.position.set(118,74,0); scene.add(hl); this.heapLabel=hl;
+    const heapCol=new T.Mesh(new T.BoxGeometry(36,44,36), new T.MeshLambertMaterial({color:0xa78bfa,transparent:true,opacity:0.07}));
+    heapCol.position.set(118,54,0); scene.add(heapCol); this.layers.push({position:heapCol.position,_m:heapCol});
+    // per-lane cores + slots
+    const C=this.sim.carriers.length; this.coreMeshes=[]; this.slotMeshes=[]; this.lockSprites=[];
+    for(let i=0;i<C;i++){ const x=this.laneX(i);
+      const core=new T.Mesh(new T.BoxGeometry(12,8,12), new T.MeshLambertMaterial({color:0xf5b84c,emissive:0xf5b84c,emissiveIntensity:0.25}));
+      core.position.set(x,6,0); scene.add(core); this.coreMeshes.push(core);
+      const slot=new T.Mesh(new T.TorusGeometry(6,0.7,10,32), new T.MeshBasicMaterial({color:0x60a5fa}));
+      slot.rotation.x=Math.PI/2; slot.position.set(x,28.4,0); scene.add(slot); this.slotMeshes.push(slot);
+      const pillar=new T.Mesh(new T.CylinderGeometry(0.5,0.5,26,6), new T.MeshBasicMaterial({color:0x60a5fa,transparent:true,opacity:0.18}));
+      pillar.position.set(x,15,0); scene.add(pillar);
+      const lock=this.textSprite('PINNED',0xf87171); lock.position.set(x,40,0); lock.visible=false; scene.add(lock); this.lockSprites.push(lock);
+      const cl=this.textSprite('C'+(i+1),0x8ea2b8,24); cl.position.set(x,22,16); scene.add(cl);
+    }
+    // scheduler ring
+    this.ring=new T.Mesh(new T.TorusGeometry(14,0.9,10,48), new T.MeshBasicMaterial({color:0xa78bfa}));
+    this.ring.rotation.x=Math.PI/2; this.ring.position.y=56; scene.add(this.ring);
+    // task inlet
+    const inlet=this.textSprite('APPLICATION TASKS ↓',0x7d8fa3); inlet.position.set(-130,112,0); scene.add(inlet);
+    const exitL=this.textSprite('COMPLETED →',0x5c7089,18); exitL.position.set(140,-6,40); scene.add(exitL);
+    // instanced VTs
+    const cap=(this.props.maxThreads??500)+40;
+    this.inst=new T.InstancedMesh(new T.SphereGeometry(1.9,10,8), new T.MeshLambertMaterial({emissiveIntensity:0.6}), cap);
+    this.inst.instanceMatrix.setUsage(T.DynamicDrawUsage); scene.add(this.inst);
+    this.instGlow=new T.InstancedMesh(new T.SphereGeometry(3.6,8,6), new T.MeshBasicMaterial({transparent:true,opacity:0.22,blending:T.AdditiveBlending,depthWrite:false}), cap);
+    this.instGlow.instanceMatrix.setUsage(T.DynamicDrawUsage); scene.add(this.instGlow);
+    this.instVts=[];
+    // hero trail
+    this.trailPts=Array.from({length:36},()=>new T.Vector3(0,-999,0));
+    const tg=new T.BufferGeometry().setFromPoints(this.trailPts);
+    const tc=new Float32Array(36*3); for(let i=0;i<36;i++){ const f=i/35; tc[i*3]=0.43*f; tc[i*3+1]=0.91*f; tc[i*3+2]=0.72*f; }
+    tg.setAttribute('color',new T.BufferAttribute(tc,3));
+    this.trail=new T.Line(tg,new T.LineBasicMaterial({vertexColors:true,transparent:true,opacity:0.9})); scene.add(this.trail);
+    this.heroLabel=null; this.heroId=null;
+    this.dummy=new T.Object3D(); this.colGreen=new T.Color(0x34d399); this.colBlue=new T.Color(0x60a5fa);
+    this.colPurple=new T.Color(0xa78bfa); this.colRed=new T.Color(0xf87171); this.colWhite=new T.Color(0xe6edf3);
+    // ground
+    const grid=new T.GridHelper(600,40,0x14202e,0x0e1620); grid.position.y=-16; scene.add(grid);
+    // orbit interaction
+    const el=renderer.domElement; let drag=null;
+    el.addEventListener('pointerdown',e=>{ drag={x:e.clientX,y:e.clientY}; this.camGoal=null; el.setPointerCapture(e.pointerId); mnt.style.cursor='grabbing'; });
+    el.addEventListener('pointermove',e=>{ if(!drag) return; const o=this.orbit;
+      o.th-=(e.clientX-drag.x)*0.005; o.ph=Math.max(0.15,Math.min(1.45,o.ph-(e.clientY-drag.y)*0.004)); drag={x:e.clientX,y:e.clientY}; });
+    el.addEventListener('pointerup',()=>{ drag=null; mnt.style.cursor='grab'; });
+    el.addEventListener('wheel',e=>{ e.preventDefault(); this.camGoal=null; this.orbit.d=Math.max(80,Math.min(480,this.orbit.d+e.deltaY*0.4)); },{passive:false});
+    // hover tooltip
+    this.raycaster=new T.Raycaster(); this.pointer=null;
+    el.addEventListener('pointermove',e=>{ if(drag){ this.pointer=null; return; }
+      const r=el.getBoundingClientRect(); this.pointer={x:((e.clientX-r.left)/r.width)*2-1, y:-((e.clientY-r.top)/r.height)*2+1, px:e.clientX-r.left, py:e.clientY-r.top}; });
+    el.addEventListener('pointerleave',()=>{ this.pointer=null; });
+    // keyboard
+    this.onKey=(e)=>{ if(/INPUT|TEXTAREA/.test(e.target.tagName)) return;
+      if(e.key===' '){ e.preventDefault(); const s=this.sim; s.running=!s.running; this.setState({playLabel:s.running?'Pause':'Run',statusText:s.running?'RUNNING':'PAUSED'}); }
+      else if(e.key==='ArrowRight') this.gotoChap(this.state.chap+1);
+      else if(e.key==='ArrowLeft') this.gotoChap(this.state.chap-1);
+      else if(e.key==='1') this.camTo('overview'); else if(e.key==='2') this.camTo('carriers');
+      else if(e.key==='3') this.camTo('heap'); else if(e.key==='4') this.camTo('top'); };
+    window.addEventListener('keydown',this.onKey);
+  }
+  textSprite(txt,color,size){ const T=window.THREE, fs=size||28, c=document.createElement('canvas'), x=c.getContext('2d');
+    x.font='600 '+fs+'px "IBM Plex Mono", monospace'; const w=Math.ceil(x.measureText(txt).width)+12;
+    c.width=w; c.height=fs+14; const x2=c.getContext('2d');
+    x2.font='600 '+fs+'px "IBM Plex Mono", monospace'; x2.textBaseline='middle';
+    x2.fillStyle='#'+new T.Color(color).getHexString(); x2.fillText(txt,6,c.height/2);
+    const sp=new T.Sprite(new T.SpriteMaterial({map:new T.CanvasTexture(c),transparent:true,depthTest:false}));
+    sp.scale.set(w*0.42,c.height*0.42,1); return sp; }
+  updateScene(){ const T=window.THREE, s=this.sim, t=s.t;
+    // boot rise
+    const A=i=>Math.max(0,Math.min(1,(s.boot-i*0.5)/0.5));
+    this.layers.forEach((g,i)=>{ const a=A(i<4?i:4); const ty=[0,26,52,78,30,54][i]??g.position.y;
+      if(g.position) g.position.y=ty-(1-a)*18; if(g._m) g._m.material.opacity=0.07*a;
+      if(g.traverse) g.traverse(o=>{ if(o.material&&o.material.transparent!==undefined&&!o._keep){ } }); });
+    this.ring.rotation.z=t*1.5; this.ring.material.color.set(A(2)>0.6?0xa78bfa:0x2a2145);
+    // cores + slots
+    s.carriers.forEach((c,i)=>{ const core=this.coreMeshes[i], slot=this.slotMeshes[i], lock=this.lockSprites[i];
+      if(!core) return; const pinned=c.pinT>0;
+      core.material.emissiveIntensity=0.2+c.heat*0.9+Math.sin(t*6+i)*0.05*c.heat;
+      core.material.emissive.set(pinned?0xf87171:0xf5b84c); core.material.color.set(pinned?0x5c2020:0xf5b84c);
+      slot.material.color.set(pinned?0xf87171:(c.vt?0x60a5fa:0x24425f));
+      slot.scale.setScalar(pinned?1+Math.sin(t*8)*0.08:1);
+      lock.visible=pinned; });
+    // camera
+    const o=this.orbit;
+    if(this.camGoal){ const g=this.camGoal, k=0.06;
+      o.th+=(g.th-o.th)*k; o.ph+=(g.ph-o.ph)*k; o.d+=(g.d-o.d)*k; o.ty+=((g.ty??45)-o.ty)*k;
+      if(Math.abs(g.d-o.d)<1&&Math.abs(g.th-o.th)<0.01) this.camGoal=null; }
+    o.ty=o.ty||45;
+    this.camera.position.set(Math.sin(o.th)*Math.sin(o.ph)*o.d, Math.cos(o.ph)*o.d+o.ty, Math.cos(o.th)*Math.sin(o.ph)*o.d);
+    this.camera.lookAt(0,o.ty,0);
+    // instances
+    let n=0; const d=this.dummy;
+    for(const vt of s.vts){ d.position.set(vt.pos.x,vt.pos.y,vt.pos.z);
+      let col=this.colGreen, sc=1;
+      if(vt.state==='running'||vt.state==='mounting'){ col=(vt.carrier&&vt.carrier.pinT>0)?this.colRed:this.colBlue; sc=1.5+(vt.state==='running'?Math.sin(t*7+vt.id)*0.12:0); }
+      else if(vt.state==='parking'||vt.state==='parked'){ col=this.colPurple; sc=0.9; }
+      else if(vt.state==='done'){ col=this.colWhite; }
+      if(vt.hero) sc*=1.45;
+      d.scale.setScalar(sc); d.updateMatrix();
+      this.inst.setMatrixAt(n,d.matrix); this.inst.setColorAt(n,col);
+      d.scale.setScalar(sc*1.15); d.updateMatrix();
+      this.instGlow.setMatrixAt(n,d.matrix); this.instGlow.setColorAt(n,col);
+      this.instVts[n]=vt; n++; }
+    this.inst.count=n; this.inst.instanceMatrix.needsUpdate=true;
+    if(this.inst.instanceColor) this.inst.instanceColor.needsUpdate=true;
+    this.instGlow.count=n; this.instGlow.instanceMatrix.needsUpdate=true;
+    if(this.instGlow.instanceColor) this.instGlow.instanceColor.needsUpdate=true;
+    // hero trail + label
+    const hero=s.hero;
+    if(hero){ this.trailPts.shift(); this.trailPts.push(new T.Vector3(hero.pos.x,hero.pos.y,hero.pos.z));
+      this.trail.geometry.setFromPoints(this.trailPts); this.trail.visible=true;
+      if(this.heroId!==hero.id){ this.heroId=hero.id;
+        if(this.heroLabel) this.scene.remove(this.heroLabel);
+        this.heroLabel=this.textSprite('VT-'+hero.id,0x6ee7b7,24); this.scene.add(this.heroLabel); }
+      if(this.heroLabel){ this.heroLabel.visible=true; this.heroLabel.position.set(hero.pos.x,hero.pos.y+8,hero.pos.z); }
+    } else { this.trail.visible=false; if(this.heroLabel) this.heroLabel.visible=false; }
+    // hover tooltip
+    const tip=this.tipRef&&this.tipRef.current;
+    if(tip){ let hit=null;
+      if(this.pointer&&this.frame%3===0){ this.raycaster.setFromCamera(this.pointer,this.camera);
+        const ix=this.raycaster.intersectObject(this.inst); if(ix.length) hit=this.instVts[ix[0].instanceId]; this._hit=hit; }
+      else if(this.pointer) hit=this._hit;
+      if(hit&&this.pointer){ const ci=hit.carrier?s.carriers.indexOf(hit.carrier):-1;
+        const pct=hit.work0?Math.max(0,Math.min(100,Math.round((1-hit.work/hit.work0)*100))):0;
+        tip.style.display='block'; tip.style.left=(this.pointer.px+14)+'px'; tip.style.top=(this.pointer.py+10)+'px';
+        tip.textContent='VT-'+hit.id+' · '+hit.state+(ci>=0?' on C'+(ci+1):'')+(hit.state==='running'?' · '+pct+'% done':'')+(hit.state==='parked'?' · I/O '+hit.io.toFixed(1)+'s':'');
+      } else tip.style.display='none'; }
+    // resize
+    const mnt=this.mountRef.current, W=mnt.clientWidth, H=mnt.clientHeight;
+    if(W&&H&&(this._w!==W||this._h!==H)){ this._w=W; this._h=H; this.renderer.setSize(W,H); this.camera.aspect=W/H; this.camera.updateProjectionMatrix(); }
+    this.renderer.render(this.scene,this.camera); }
+  componentDidMount(){ this.resetSim();
+    const start=()=>{ if(!window.THREE||!this.mountRef.current){ setTimeout(start,60); return; }
+      this.buildScene(); this.frame=0; this.last=performance.now();
+      const loop=(now)=>{ this.raf=requestAnimationFrame(loop);
+        let dt=Math.min(0.05,(now-this.last)/1000); this.last=now; const s=this.sim;
+        if(s.running){ dt*=s.speed; s.t+=dt;
+          if(s.boot<3){ s.boot+=dt; if(s.boot>=3){ this.log('scheduler online'); this.setState({statusText:'RUNNING'}); this.gotoChap(1); } }
+          else this.tick(dt); }
+        this.updateScene(); if(++this.frame%10===0) this.sync(); };
+      this.raf=requestAnimationFrame(loop); };
+    start(); }
+  componentWillUnmount(){ cancelAnimationFrame(this.raf); window.removeEventListener('keydown',this.onKey); if(this.renderer) this.renderer.dispose(); }
+}
+</script>
+</body>
+</html>

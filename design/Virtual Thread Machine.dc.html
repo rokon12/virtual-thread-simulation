@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;background:#0a0f16;height:100%;overflow:hidden}
+*{box-sizing:border-box}
+a{color:#6ee7b7;text-decoration:none}a:hover{color:#a7f3d0}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+input[type=range]{accent-color:#34d399}
+</style>
+</helmet>
+<div style="height:100vh;display:flex;flex-direction:column;font-family:'Space Grotesk',sans-serif;color:#e6edf3;background:#0a0f16">
+  <div style="display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid #17222e" data-screen-label="Header">
+    <div style="width:10px;height:10px;border-radius:50%;background:#34d399;box-shadow:0 0 12px #34d399;animation:led 1.6s infinite"></div>
+    <div>
+      <div style="font-size:19px;font-weight:700;letter-spacing:.04em">THE VIRTUAL THREAD MACHINE</div>
+      <div style="font-size:12px;color:#7d8fa3">How Java virtual threads mount, park, resume and pin — live</div>
+    </div>
+    <div style="margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.12em;color:#34d399">{{ statusText }}</div>
+  </div>
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="flex:1;position:relative;min-width:0">
+      <canvas ref="{{ canvasRef }}" style="width:100%;height:100%;display:block"></canvas>
+    </div>
+    <div style="width:296px;border-left:1px solid #17222e;padding:16px;display:flex;flex-direction:column;gap:16px;overflow:hidden" data-screen-label="Sidebar">
+      <div>
+        <div style="font-size:11px;letter-spacing:.16em;color:#7d8fa3;margin-bottom:8px">LIVE COUNTERS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-family:'IBM Plex Mono',monospace">
+          <div style="background:#0f1722;border:1px solid #1c2938;border-radius:8px;padding:8px 10px"><div style="font-size:20px;color:#34d399">{{ stats.runnable }}</div><div style="font-size:10px;color:#7d8fa3">RUNNABLE</div></div>
+          <div style="background:#0f1722;border:1px solid #1c2938;border-radius:8px;padding:8px 10px"><div style="font-size:20px;color:#60a5fa">{{ stats.mounted }}</div><div style="font-size:10px;color:#7d8fa3">MOUNTED</div></div>
+          <div style="background:#0f1722;border:1px solid #1c2938;border-radius:8px;padding:8px 10px"><div style="font-size:20px;color:#a78bfa">{{ stats.parked }}</div><div style="font-size:10px;color:#7d8fa3">PARKED</div></div>
+          <div style="background:#0f1722;border:1px solid #1c2938;border-radius:8px;padding:8px 10px"><div style="font-size:20px;color:#e6edf3">{{ stats.completed }}</div><div style="font-size:10px;color:#7d8fa3">COMPLETED</div></div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:11px;letter-spacing:.16em;color:#7d8fa3">KEY BEHAVIORS</div>
+        <div style="position:relative;border:1px solid #1c2938;border-radius:8px;padding:9px 11px;background:#0f1722">
+          <div style="position:absolute;inset:0;border-radius:8px;background:rgba(96,165,250,.16);opacity:{{ fMount }};transition:opacity .35s"></div>
+          <div style="font-size:13px;font-weight:500;color:#60a5fa">1 · Mount</div>
+          <div style="font-size:11px;color:#8ea2b8">Runnable VT is mounted on a free carrier thread.</div>
+        </div>
+        <div style="position:relative;border:1px solid #1c2938;border-radius:8px;padding:9px 11px;background:#0f1722">
+          <div style="position:absolute;inset:0;border-radius:8px;background:rgba(167,139,250,.16);opacity:{{ fPark }};transition:opacity .35s"></div>
+          <div style="font-size:13px;font-weight:500;color:#a78bfa">2 · Park</div>
+          <div style="font-size:11px;color:#8ea2b8">Blocking I/O unmounts the VT; its continuation is stored on the heap and the carrier is released.</div>
+        </div>
+        <div style="position:relative;border:1px solid #1c2938;border-radius:8px;padding:9px 11px;background:#0f1722">
+          <div style="position:absolute;inset:0;border-radius:8px;background:rgba(52,211,153,.16);opacity:{{ fResume }};transition:opacity .35s"></div>
+          <div style="font-size:13px;font-weight:500;color:#34d399">3 · Resume</div>
+          <div style="font-size:11px;color:#8ea2b8">I/O completes; the VT re-enters the queue and remounts on any carrier.</div>
+        </div>
+        <div style="position:relative;border:1px solid #1c2938;border-radius:8px;padding:9px 11px;background:#0f1722">
+          <div style="position:absolute;inset:0;border-radius:8px;background:rgba(248,113,113,.18);opacity:{{ fPin }};transition:opacity .35s"></div>
+          <div style="font-size:13px;font-weight:500;color:#f87171">4 · Pinned</div>
+          <div style="font-size:11px;color:#8ea2b8">Blocking inside synchronized/native code pins the carrier — it cannot be released.</div>
+        </div>
+      </div>
+      <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+        <div style="font-size:11px;letter-spacing:.16em;color:#7d8fa3;margin-bottom:6px">EVENT LOG</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:1.75;color:#9db2c8;overflow:hidden">
+          <sc-for list="{{ feed }}" as="line" hint-placeholder-count="3">
+            <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ line }}</div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 22px;border-top:1px solid #17222e" data-screen-label="Controls">
+    <button onClick="{{ toggleRun }}" style="font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:500;padding:8px 18px;border-radius:8px;border:1px solid #2a5c48;background:#0f2b21;color:#6ee7b7;cursor:pointer">{{ playLabel }}</button>
+    <button onClick="{{ burst }}" style="font-family:'Space Grotesk',sans-serif;font-size:13px;padding:8px 14px;border-radius:8px;border:1px solid #24425f;background:#0f1e30;color:#93c5fd;cursor:pointer">+15 tasks</button>
+    <button onClick="{{ forcePark }}" style="font-family:'Space Grotesk',sans-serif;font-size:13px;padding:8px 14px;border-radius:8px;border:1px solid #3d3564;background:#191531;color:#c4b5fd;cursor:pointer">Force park</button>
+    <button onClick="{{ forcePin }}" style="font-family:'Space Grotesk',sans-serif;font-size:13px;padding:8px 14px;border-radius:8px;border:1px solid #5c2a2a;background:#2b0f0f;color:#fca5a5;cursor:pointer">Force pin</button>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:10px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#7d8fa3">
+      <span>SPEED</span>
+      <input type="range" min="0.25" max="3" step="0.25" defaultValue="1" onChange="{{ onSpeed }}" style="width:130px">
+      <span style="color:#e6edf3;width:44px">{{ speedLabel }}</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;carriers&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:4,&quot;min&quot;:2,&quot;max&quot;:6,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;},&quot;taskRate&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1.5,&quot;min&quot;:0.3,&quot;max&quot;:4,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;tasks/s&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;},&quot;chaos&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Machine&quot;}}">
+class Component extends DCLogic {
+  state = { stats:{runnable:0,mounted:0,parked:0,completed:0}, feed:['— boot sequence initiated —'], fMount:0,fPark:0,fResume:0,fPin:0, statusText:'BOOTING', playLabel:'Pause', speedLabel:'1.00×' };
+  renderVals(){
+    this.canvasRef = this.canvasRef || React.createRef();
+    return { canvasRef:this.canvasRef, stats:this.state.stats, feed:this.state.feed,
+      fMount:this.state.fMount, fPark:this.state.fPark, fResume:this.state.fResume, fPin:this.state.fPin,
+      statusText:this.state.statusText, playLabel:this.state.playLabel, speedLabel:this.state.speedLabel,
+      toggleRun:()=>{ const s=this.sim; s.running=!s.running; this.setState({playLabel:s.running?'Pause':'Run', statusText:s.running?'RUNNING':'PAUSED'}); },
+      burst:()=>{ this.sim.burst+=15; this.log('burst: 15 tasks submitted'); },
+      forcePark:()=>{ const v=this.sim.vts.find(v=>v.state==='running'&&!v.carrier.pinT); if(v) this.park(v); else this.log('no unpinned running VT to park'); },
+      forcePin:()=>{ const v=this.sim.vts.find(v=>v.state==='running'&&!v.carrier.pinT); if(v) this.pin(v); else this.log('no running VT to pin'); },
+      onSpeed:(e)=>{ this.sim.speed=parseFloat(e.target.value); this.setState({speedLabel:this.sim.speed.toFixed(2)+'×'}); }
+    };
+  }
+  log(msg){ const s=this.sim; s.feed.unshift(('00'+Math.floor(s.t)).slice(-3)+'s '+msg); s.feed=s.feed.slice(0,9); }
+  flash(k){ this.sim.flash[k]=this.sim.t; }
+  componentDidMount(){
+    const C = Math.max(2, Math.min(6, this.props.carriers ?? 4));
+    this.sim = { t:0, boot:0, speed:1, running:true, vts:[], queue:[], nextId:1, spawnAcc:0, burst:0, completed:0,
+      flash:{mount:-9,park:-9,resume:-9,pin:-9}, feed:['boot: power on'],
+      carriers:Array.from({length:C},()=>({vt:null,pinT:0,heat:0})) };
+    this.frame=0; this.last=performance.now();
+    const loop=(now)=>{ this.raf=requestAnimationFrame(loop);
+      let dt=Math.min(0.05,(now-this.last)/1000); this.last=now;
+      const s=this.sim;
+      if(s.running){ dt*=s.speed; s.t+=dt; if(s.boot<3){ s.boot+=dt; if(s.boot>=3){ this.log('scheduler online (ForkJoinPool)'); this.setState({statusText:'RUNNING'}); } } else this.tick(dt); }
+      this.draw();
+      if(++this.frame%10===0) this.sync();
+    };
+    this.raf=requestAnimationFrame(loop);
+  }
+  componentWillUnmount(){ cancelAnimationFrame(this.raf); }
+  // ---------- simulation ----------
+  spawn(){
+    const s=this.sim, g=this.geo;
+    const vt={ id:s.nextId++, state:'toQueue', pos:{u:g.spawn.u+(Math.random()*60-30), v:g.spawn.v+(Math.random()*30-15), z:g.spawn.z}, work0:0, work:0, io:0, carrier:null, resumed:false };
+    vt.work0=vt.work=1.6+Math.random()*2.6;
+    this.animTo(vt, this.queueSlot(s.queue.length), 0.7, ()=>{ vt.state='queued'; });
+    s.queue.push(vt); s.vts.push(vt);
+  }
+  queueSlot(i){ const g=this.geo; const cols=9; const r=Math.floor(i/cols), c=i%cols; return {u:-g.qw+18+c*(g.qw*2-36)/(cols-1), v:(r%2?14:-14), z:g.zQueue+8}; }
+  storeSlot(i){ const g=this.geo; const cols=4; const r=Math.floor(i/cols), c=i%cols; return {u:g.store.u-42+c*28, v:g.store.v+(r%2?12:-12), z:g.store.z+8+Math.floor(r/2)*16}; }
+  animTo(vt,to,dur,done){ vt.anim={from:{...vt.pos},to,t:0,dur,done,arc:30+Math.random()*25}; }
+  park(vt){
+    const s=this.sim; vt.carrier.vt=null; vt.carrier=null; vt.state='parking'; vt.io=1.8+Math.random()*3;
+    const parked=s.vts.filter(v=>v.state==='parked'||v.state==='parking').length;
+    this.animTo(vt, this.storeSlot(parked), 0.8, ()=>{ vt.state='parked'; });
+    this.flash('park'); this.log('VT-'+vt.id+' parked · carrier released');
+  }
+  pin(vt){ vt.carrier.pinT=2.4+Math.random()*1.2; this.flash('pin'); this.log('VT-'+vt.id+' PINNED carrier C'+(this.sim.carriers.indexOf(vt.carrier)+1)); }
+  tick(dt){
+    const s=this.sim, chaos=this.props.chaos ?? true, rate=this.props.taskRate ?? 1.5;
+    // spawn
+    const alive=s.vts.length;
+    s.spawnAcc+=rate*dt;
+    let n=0;
+    while((s.spawnAcc>=1||s.burst>0)&&alive+n<90&&n<2){ if(s.burst>0)s.burst--; else s.spawnAcc-=1; this.spawn(); n++; }
+    // animations
+    for(const vt of s.vts){ const a=vt.anim; if(a){ a.t+=dt/a.dur; const t=Math.min(1,a.t), e=t*t*(3-2*t);
+      vt.pos={ u:a.from.u+(a.to.u-a.from.u)*e, v:a.from.v+(a.to.v-a.from.v)*e, z:a.from.z+(a.to.z-a.from.z)*e+Math.sin(Math.PI*e)*a.arc };
+      if(t>=1){ vt.anim=null; a.done&&a.done(); } } }
+    // queued drift toward slots
+    s.queue.forEach((vt,i)=>{ if(vt.state==='queued'&&!vt.anim){ const tg=this.queueSlot(i), k=Math.min(1,dt*5);
+      vt.pos.u+=(tg.u-vt.pos.u)*k; vt.pos.v+=(tg.v-vt.pos.v)*k; vt.pos.z+=(tg.z-vt.pos.z)*k; } });
+    // mount
+    s.carriers.forEach((c,i)=>{ c.heat=Math.max(0,c.heat-dt*0.8); if(c.pinT>0){ c.pinT-=dt; if(c.pinT<=0){ c.pinT=0; if(c.vt) this.log('VT-'+c.vt.id+' unpinned · resumes work'); } }
+      if(!c.vt){ const idx=s.queue.findIndex(v=>v.state==='queued'&&!v.anim); if(idx>=0){ const vt=s.queue.splice(idx,1)[0];
+        c.vt=vt; vt.carrier=c; vt.state='mounting';
+        this.animTo(vt,{u:this.laneU(i),v:0,z:this.geo.zCarrier+10},0.55,()=>{ vt.state='running'; });
+        this.flash('mount'); if(vt.resumed) this.log('VT-'+vt.id+' resumed on C'+(i+1)); else this.log('VT-'+vt.id+' mounted on C'+(i+1)); } } });
+    // running
+    for(const vt of [...s.vts]){
+      if(vt.state==='running'){ const c=vt.carrier; c.heat=Math.min(1,c.heat+dt*2);
+        if(c.pinT>0){ /* blocked while pinned: no progress */ }
+        else { vt.work-=dt;
+          if(chaos&&vt.work>0.4){ const r=Math.random();
+            if(!vt.resumed&&r<dt*0.28) this.park(vt);
+            else if(r>1-dt*0.05) this.pin(vt); }
+          if(vt.work<=0){ const i=s.carriers.indexOf(c); c.vt=null; vt.carrier=null; vt.state='done';
+            this.animTo(vt,{u:this.geo.exit.u,v:this.geo.exit.v,z:this.geo.exit.z},0.8,()=>{ vt.state='dead'; });
+            s.completed++; this.log('VT-'+vt.id+' completed · C'+(i+1)+' free'); } }
+      } else if(vt.state==='parked'){ vt.io-=dt;
+        if(vt.io<=0){ vt.state='toQueue'; vt.resumed=true; s.queue.unshift(vt);
+          this.animTo(vt,this.queueSlot(0),0.8,()=>{ vt.state='queued'; });
+          this.flash('resume'); this.log('VT-'+vt.id+' I/O done · runnable'); } }
+    }
+    s.vts=s.vts.filter(v=>v.state!=='dead');
+    // restack parked
+    let pi=0; for(const vt of s.vts) if(vt.state==='parked'&&!vt.anim){ const tg=this.storeSlot(pi++), k=Math.min(1,dt*4);
+      vt.pos.u+=(tg.u-vt.pos.u)*k; vt.pos.v+=(tg.v-vt.pos.v)*k; vt.pos.z+=(tg.z-vt.pos.z)*k; }
+  }
+  sync(){
+    const s=this.sim, f=(k)=>Math.max(0,1-(s.t-s.flash[k])/1.6);
+    this.setState({ stats:{ runnable:s.queue.length, mounted:s.carriers.filter(c=>c.vt).length, parked:s.vts.filter(v=>v.state==='parked'||v.state==='parking').length, completed:s.completed },
+      feed:[...s.feed], fMount:f('mount'), fPark:f('park'), fResume:f('resume'), fPin:f('pin') });
+  }
+  // ---------- rendering ----------
+  laneU(i){ const C=this.sim.carriers.length; return (i-(C-1)/2)*(this.geo.qw*2-40)/Math.max(1,C-1)*0.8; }
+  P(u,v,z){ const g=this.geo; return { x:g.ox+(u-v)*0.9, y:g.oy+(u+v)*0.5-z }; }
+  plat(u,v,z,a,b,th,top,side,edge,alpha){
+    const ctx=this.ctx; ctx.globalAlpha=alpha;
+    const c1=this.P(u-a,v-b,z),c2=this.P(u+a,v-b,z),c3=this.P(u+a,v+b,z),c4=this.P(u-a,v+b,z);
+    ctx.fillStyle=side;
+    ctx.beginPath(); ctx.moveTo(c4.x,c4.y); ctx.lineTo(c3.x,c3.y); ctx.lineTo(c3.x,c3.y+th); ctx.lineTo(c4.x,c4.y+th); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(c3.x,c3.y); ctx.lineTo(c2.x,c2.y); ctx.lineTo(c2.x,c2.y+th); ctx.lineTo(c3.x,c3.y+th); ctx.closePath(); ctx.fill();
+    ctx.fillStyle=top; ctx.strokeStyle=edge; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(c1.x,c1.y); ctx.lineTo(c2.x,c2.y); ctx.lineTo(c3.x,c3.y); ctx.lineTo(c4.x,c4.y); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.globalAlpha=1;
+    return c1;
+  }
+  label(pt,txt,color,alpha,size){ const ctx=this.ctx; ctx.globalAlpha=alpha; ctx.font=(size||11)+'px "IBM Plex Mono"'; ctx.fillStyle=color; ctx.textAlign='left'; ctx.fillText(txt,pt.x,pt.y-8); ctx.globalAlpha=1; }
+  dot(p,r,color,glow,ring){ const ctx=this.ctx;
+    ctx.save(); ctx.shadowColor=color; ctx.shadowBlur=glow; ctx.fillStyle=color;
+    ctx.beginPath(); ctx.arc(p.x,p.y,r,0,7); ctx.fill(); ctx.restore();
+    if(ring!=null){ ctx.strokeStyle='rgba(230,237,243,.9)'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,r+3.5,-Math.PI/2,-Math.PI/2+ring*2*Math.PI); ctx.stroke(); }
+    // squiggle
+    ctx.strokeStyle='rgba(10,15,22,.85)'; ctx.lineWidth=1.4; ctx.beginPath();
+    ctx.moveTo(p.x-2.5,p.y-3); ctx.quadraticCurveTo(p.x+3,p.y-1,p.x-2.5,p.y+1); ctx.quadraticCurveTo(p.x+3,p.y+3,p.x-1,p.y+3.5); ctx.stroke();
+  }
+  draw(){
+    const cvs=this.canvasRef&&this.canvasRef.current; if(!cvs) return;
+    const dpr=Math.min(2,window.devicePixelRatio||1), W=cvs.clientWidth, H=cvs.clientHeight;
+    if(!W||!H) return;
+    if(cvs.width!==W*dpr||cvs.height!==H*dpr){ cvs.width=W*dpr; cvs.height=H*dpr; }
+    const ctx=this.ctx=cvs.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+    const qw=Math.min(240,W*0.24);
+    this.geo={ ox:W*0.42, oy:H*0.60, qw, zQueue:H*0.42, zSched:H*0.30, zCarrier:H*0.165, zCore:0,
+      spawn:{u:-qw-160,v:-40,z:H*0.52}, store:{u:qw+170,v:-110,z:H*0.30}, exit:{u:qw+220,v:60,z:-30} };
+    const s=this.sim, g=this.geo, t=s.t;
+    // background grid
+    ctx.strokeStyle='rgba(38,54,72,.25)'; ctx.lineWidth=1;
+    for(let x=0;x<W;x+=48){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+    const A=(i)=>Math.max(0,Math.min(1,(s.boot-i*0.55)/0.5));
+    const rise=(i)=>(1-A(i))*26;
+    // lane columns
+    ctx.setLineDash([3,6]); ctx.strokeStyle='rgba(96,165,250,.18)';
+    s.carriers.forEach((c,i)=>{ const u=this.laneU(i); const a=this.P(u,0,g.zCore+14), b=this.P(u,0,g.zSched);
+      ctx.globalAlpha=A(2); ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); ctx.globalAlpha=1; });
+    ctx.setLineDash([]);
+    // dashed link: store <-> scheduler
+    ctx.setLineDash([2,5]); ctx.strokeStyle='rgba(167,139,250,.3)'; ctx.globalAlpha=A(4);
+    const sp1=this.P(g.qw,0,g.zSched), sp2=this.P(g.store.u-60,g.store.v,g.store.z);
+    ctx.beginPath(); ctx.moveTo(sp1.x,sp1.y); ctx.lineTo(sp2.x,sp2.y); ctx.stroke(); ctx.globalAlpha=1; ctx.setLineDash([]);
+    // QUEUE platform (virtual threads, runnable)
+    let c1=this.plat(0,0,g.zQueue-rise(3),qw+30,34,10,'rgba(23,46,36,.92)','#0c1a13','rgba(52,211,153,.55)',A(3));
+    this.label(c1,'VIRTUAL THREADS · runnable queue','#34d399',A(3));
+    // SCHEDULER
+    c1=this.plat(0,0,g.zSched-rise(2),qw+50,30,12,'rgba(36,28,66,.95)','#161029','rgba(167,139,250,.6)',A(2));
+    this.label(c1,'SCHEDULER · ForkJoinPool','#a78bfa',A(2));
+    if(A(2)>0.5){ // rotating hub
+      const h=this.P(0,0,g.zSched+6); ctx.strokeStyle='rgba(167,139,250,.8)'; ctx.lineWidth=1.5;
+      for(let k=0;k<3;k++){ const a0=t*1.8+k*2.09; ctx.beginPath(); ctx.arc(h.x,h.y,9,a0,a0+1.2); ctx.stroke(); }
+    }
+    // SNAPSHOT STORE
+    c1=this.plat(g.store.u,g.store.v,g.store.z-rise(4),74,44,12,'rgba(40,32,72,.9)','#171129','rgba(167,139,250,.5)',A(4));
+    this.label({x:c1.x,y:c1.y},'CONTINUATION SNAPSHOTS','#a78bfa',A(4));
+    this.label({x:c1.x,y:c1.y+14},'stacks stored on the heap','#6b6394',A(4),10);
+    // CARRIERS
+    c1=this.plat(0,0,g.zCarrier-rise(1),qw+50,36,12,'rgba(18,36,58,.95)','#0b1626','rgba(96,165,250,.6)',A(1));
+    this.label(c1,'CARRIER THREADS · platform threads','#60a5fa',A(1));
+    // CORES
+    c1=this.plat(0,0,g.zCore-rise(0),qw+50,40,16,'rgba(58,44,16,.95)','#241a08','rgba(245,184,76,.55)',A(0));
+    this.label(c1,'OS THREADS / CPU CORES','#f5b84c',A(0));
+    // per-lane hardware
+    s.carriers.forEach((c,i)=>{ const u=this.laneU(i);
+      // core cube
+      const heat=c.heat, coreCol=c.pinT>0?'#f87171':'#f5b84c';
+      const cp=this.P(u,0,g.zCore+10-rise(0)); ctx.globalAlpha=A(0);
+      ctx.save(); ctx.shadowColor=coreCol; ctx.shadowBlur=8+heat*18;
+      ctx.fillStyle=c.pinT>0?'rgba(248,113,113,.9)':'rgba(245,184,76,'+(0.35+heat*0.6)+')';
+      ctx.fillRect(cp.x-9,cp.y-9,18,18); ctx.restore();
+      ctx.font='9px "IBM Plex Mono"'; ctx.fillStyle='#8ea2b8'; ctx.textAlign='center'; ctx.fillText('CPU'+(i+1),cp.x,cp.y+24); ctx.globalAlpha=1;
+      // carrier slot
+      const sl=this.P(u,0,g.zCarrier+8-rise(1)); ctx.globalAlpha=A(1);
+      ctx.strokeStyle=c.pinT>0?'#f87171':(c.vt?'#60a5fa':'rgba(96,165,250,.4)'); ctx.lineWidth=1.6;
+      ctx.beginPath(); ctx.ellipse(sl.x,sl.y+4,14,6,0,0,7); ctx.stroke();
+      ctx.font='9px "IBM Plex Mono"'; ctx.fillStyle=c.pinT>0?'#f87171':'#8ea2b8'; ctx.fillText(c.pinT>0?'C'+(i+1)+' PINNED':'C'+(i+1),sl.x,sl.y+20);
+      if(c.pinT>0){ // padlock
+        ctx.strokeStyle='#f87171'; ctx.fillStyle='#f87171'; ctx.lineWidth=1.6;
+        ctx.beginPath(); ctx.arc(sl.x+20,sl.y-8,4,Math.PI,0); ctx.stroke(); ctx.fillRect(sl.x+15,sl.y-8,10,8);
+      }
+      ctx.globalAlpha=1;
+    });
+    // spawn chute
+    ctx.globalAlpha=A(3); const spn=this.P(g.spawn.u,g.spawn.v,g.spawn.z);
+    ctx.font='11px "IBM Plex Mono"'; ctx.fillStyle='#7d8fa3'; ctx.textAlign='center';
+    ctx.fillText('APPLICATION TASKS',spn.x,spn.y-14);
+    ctx.strokeStyle='rgba(125,143,163,.5)'; ctx.strokeRect(spn.x-30,spn.y-6,60,20);
+    ctx.globalAlpha=1;
+    // exit label
+    ctx.globalAlpha=A(0); const ex=this.P(g.exit.u,g.exit.v,g.exit.z);
+    ctx.fillStyle='#5c7089'; ctx.font='10px "IBM Plex Mono"'; ctx.fillText('COMPLETED →',ex.x-10,ex.y+4); ctx.globalAlpha=1;
+    // VT particles (sorted by screen y)
+    const pts=s.vts.map(vt=>({vt,p:this.P(vt.pos.u,vt.pos.v,vt.pos.z)})).sort((a,b)=>a.p.y-b.p.y);
+    for(const {vt,p} of pts){
+      let col='#34d399', glow=8, ring=null, r=6;
+      if(vt.state==='running'||vt.state==='mounting'){ col=vt.carrier&&vt.carrier.pinT>0?'#f87171':'#60a5fa'; glow=14; if(vt.state==='running') ring=1-vt.work/vt.work0; }
+      else if(vt.state==='parking'||vt.state==='parked'){ col='#a78bfa'; glow=6; r=5.5; ctx.globalAlpha=0.85; }
+      else if(vt.state==='done'){ col='#e6edf3'; glow=10; }
+      this.dot(p,r,col,glow,ring); ctx.globalAlpha=1;
+    }
+    // boot overlay
+    if(s.boot<3){ ctx.fillStyle='rgba(10,15,22,'+(0.25*(1-s.boot/3))+')'; ctx.fillRect(0,0,W,H);
+      ctx.textAlign='center'; ctx.font='600 13px "IBM Plex Mono"'; ctx.fillStyle='#34d399';
+      const steps=['[1/5] CPU cores online','[2/5] platform threads started','[3/5] carrier pool ready','[4/5] ForkJoinPool scheduler up','[5/5] accepting tasks'];
+      ctx.fillText(steps[Math.min(4,Math.floor(s.boot/0.6))],W/2,H-28);
+      ctx.fillStyle='rgba(52,211,153,.25)'; ctx.fillRect(W/2-120,H-18,240,3);
+      ctx.fillStyle='#34d399'; ctx.fillRect(W/2-120,H-18,240*Math.min(1,s.boot/3),3);
+    }
+    ctx.textAlign='left';
+  }
+}
+</script>
+</body>
+</html>
