@@ -5,6 +5,8 @@ park, resume, and pin across a small carrier pool. The implementation follows
 [`design/JavaFX-Spec.md`](design/JavaFX-Spec.md) and uses the accompanying HTML
 simulation as its behavioral reference.
 
+![The Virtual Thread Machine demonstrating ten carrier lanes, heap-backed I/O waits, and GC-eligible completed threads](docs/media/virtual-thread-machine-demo.gif)
+
 ## Run
 
 Requirements: JDK 25 and Maven 3.9+.
