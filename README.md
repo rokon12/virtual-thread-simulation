@@ -59,8 +59,8 @@ accessible descriptions.
 
 At the top of the machine, animated code cards pass through the application
 task inlet before becoming runnable virtual threads. At the bottom, each OS/CPU
-core has a small work rotor: it spins brightly while its carrier executes,
-rests when idle, and turns into a slow red warning pulse while pinned.
+core is a toothed processor gear: it rotates and brightens while its carrier
+executes, rests when idle, and becomes a red warning stutter while pinned.
 
 The rolling timeline retains the latest 360 display snapshots. Entering history
 automatically pauses the live model, updates the 3D particles, counters, event

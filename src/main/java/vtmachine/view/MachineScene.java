@@ -61,8 +61,8 @@ public final class MachineScene extends StackPane {
     private enum AnchorAlignment { CENTER, RIGHT }
     private record ProjectedLabel(Group anchor, Label label, AnchorAlignment alignment) {}
     private record BootLayer(Group group, double restY, int order) {}
-    private record CoreActivity(Group indicator, Group rotor, Sphere pulse,
-            Cylinder piston, List<Sphere> sparks) {}
+    private record CpuCore(Group gear, List<Shape3D> heatSurfaces) {}
+    private record CoreActivity(Group indicator, Cylinder piston, List<Sphere> sparks) {}
 
     private final Sim sim;
     private final Group root3d = new Group();
@@ -88,7 +88,7 @@ public final class MachineScene extends StackPane {
 
     private final List<BootLayer> bootLayers = new ArrayList<>();
     private final List<ProjectedLabel> projectedLabels = new ArrayList<>();
-    private final List<Shape3D> cores = new ArrayList<>();
+    private final List<CpuCore> cores = new ArrayList<>();
     private final List<CoreActivity> coreActivities = new ArrayList<>();
     private final List<Cylinder> carrierPillars = new ArrayList<>();
     private final List<TorusMesh> slots = new ArrayList<>();
@@ -115,6 +115,7 @@ public final class MachineScene extends StackPane {
     private final PhongMaterial activeSlot = material(BLUE);
     private final PhongMaterial pinnedSlot = material(RED);
     private final PhongMaterial pinnedCore = material(Color.web("#8f2f31"));
+    private final PhongMaterial coreHub = material(Color.web("#231b10"));
     private final PhongMaterial coreActivityIdle = material(Color.web("#5d461f"));
     private final PhongMaterial coreActivityActive = material(Color.web("#ffd275"));
     private final PhongMaterial coreActivityPinned = material(RED);
@@ -547,32 +548,12 @@ public final class MachineScene extends StackPane {
 
     private void buildLane(int index) {
         double x = sim.laneX(index);
-        Box core = new Box(12, 8, 12);
-        core.setTranslateX(x);
-        core.setTranslateY(6);
-        core.setMaterial(coreHeatMaterials.getFirst());
-        core.setCullFace(CullFace.NONE);
-        core.setRotationAxis(Rotate.Y_AXIS);
+        CpuCore core = buildCpuCore(x);
         cores.add(core);
 
         Group indicator = new Group();
         indicator.setTranslateX(x);
         indicator.setTranslateY(6);
-        TorusMesh activityRing = new TorusMesh(7.6f, 0.38f, 32, 8);
-        activityRing.setMaterial(coreActivityIdle);
-        Group rotor = new Group();
-        rotor.setRotationAxis(Rotate.Y_AXIS);
-        for (int blade = 0; blade < 3; blade++) {
-            Box arm = new Box(11.5, 0.5, 1.15);
-            arm.setRotationAxis(Rotate.Y_AXIS);
-            arm.setRotate(blade * 60);
-            arm.setMaterial(coreActivityIdle);
-            rotor.getChildren().add(arm);
-        }
-        Sphere pulse = new Sphere(0.9, 8);
-        pulse.setTranslateX(7.6);
-        pulse.setMaterial(coreActivityIdle);
-        rotor.getChildren().add(pulse);
         Cylinder piston = new Cylinder(1.15, 9, 10);
         piston.setTranslateY(8.5);
         piston.setTranslateZ(30);
@@ -586,8 +567,7 @@ public final class MachineScene extends StackPane {
             sparks.add(spark);
             indicator.getChildren().add(spark);
         }
-        indicator.getChildren().addAll(activityRing, rotor);
-        coreActivities.add(new CoreActivity(indicator, rotor, pulse, piston, sparks));
+        coreActivities.add(new CoreActivity(indicator, piston, sparks));
 
         TorusMesh slot = new TorusMesh(6, 0.7f, 32, 8);
         slot.setTranslateX(x);
@@ -601,13 +581,48 @@ public final class MachineScene extends StackPane {
         pillar.setMaterial(transparentMaterial(BLUE, 0.18));
         pillar.setCullFace(CullFace.NONE);
         carrierPillars.add(pillar);
-        world.getChildren().addAll(core, indicator, pillar, slot);
+        world.getChildren().addAll(core.gear(), indicator, pillar, slot);
 
         addProjectedLabel("C" + (index + 1), "lane", x, 22, 16, AnchorAlignment.CENTER)
                 .setStyle("-fx-font-size: 10px;");
         Label pinned = addProjectedLabel("PINNED", "red", x, 40, 0, AnchorAlignment.CENTER);
         pinned.setVisible(false);
         pinnedLabels.add(pinned);
+    }
+
+    private CpuCore buildCpuCore(double x) {
+        Group gear = new Group();
+        gear.setTranslateX(x);
+        gear.setTranslateY(6);
+        gear.setRotationAxis(Rotate.Y_AXIS);
+        List<Shape3D> heatSurfaces = new ArrayList<>();
+
+        Cylinder body = new Cylinder(4.7, 6.4, 24);
+        body.setMaterial(coreHeatMaterials.getFirst());
+        body.setCullFace(CullFace.NONE);
+        heatSurfaces.add(body);
+        gear.getChildren().add(body);
+
+        int toothCount = 12;
+        double toothRadius = 5.35;
+        for (int toothIndex = 0; toothIndex < toothCount; toothIndex++) {
+            double angle = Math.PI * 2 * toothIndex / toothCount;
+            Box tooth = new Box(2.7, 6.6, 2.05);
+            tooth.setTranslateX(Math.cos(angle) * toothRadius);
+            tooth.setTranslateZ(Math.sin(angle) * toothRadius);
+            tooth.setRotationAxis(Rotate.Y_AXIS);
+            tooth.setRotate(-Math.toDegrees(angle));
+            tooth.setMaterial(coreHeatMaterials.getFirst());
+            tooth.setCullFace(CullFace.NONE);
+            heatSurfaces.add(tooth);
+            gear.getChildren().add(tooth);
+        }
+
+        Cylinder axle = new Cylinder(1.45, 7.0, 20);
+        axle.setMaterial(coreHub);
+        axle.setCullFace(CullFace.NONE);
+        gear.getChildren().add(axle);
+        return new CpuCore(gear, heatSurfaces);
     }
 
     private void addBoxWithEdges(Group parent, double width, double height, double depth,
@@ -842,8 +857,9 @@ public final class MachineScene extends StackPane {
             boolean working = displayCarrierMounted(i);
             int heatLevel = (int) Math.round(clamp(displayCarrierHeat(i), 0, 1)
                     * (coreHeatMaterials.size() - 1));
-            Shape3D core = cores.get(i);
-            core.setMaterial(pinned ? pinnedCore : coreHeatMaterials.get(heatLevel));
+            CpuCore core = cores.get(i);
+            PhongMaterial coreMaterial = pinned ? pinnedCore : coreHeatMaterials.get(heatLevel);
+            for (Shape3D surface : core.heatSurfaces()) surface.setMaterial(coreMaterial);
             slots.get(i).setMaterial(pinned ? pinnedSlot
                     : working ? activeSlot : idleSlot);
             double scale = pinned ? 1 + Math.sin(displayTime() * 8) * 0.08 : 1;
@@ -858,27 +874,16 @@ public final class MachineScene extends StackPane {
             for (Node node : activity.indicator().getChildren()) {
                 if (node instanceof Shape3D shape) shape.setMaterial(activityMaterial);
             }
-            for (Node node : activity.rotor().getChildren()) {
-                if (node instanceof Shape3D shape) shape.setMaterial(activityMaterial);
-            }
-            double rotorSpeed = pinned ? 42 : working ? 260 + heatLevel * 48 : 12;
-            activity.rotor().setRotate(displayTime() * rotorSpeed + i * 37);
             activity.indicator().setOpacity(pinned || working ? 0.95 : 0.2);
-            double workPulse = pinned
-                    ? 1 + 0.22 * Math.sin(displayTime() * 8 + i)
-                    : working ? 1 + 0.16 * Math.sin(displayTime() * 11 + i) : 0.75;
-            activity.pulse().setScaleX(workPulse);
-            activity.pulse().setScaleY(workPulse);
-            activity.pulse().setScaleZ(workPulse);
             activity.piston().setScaleY(pinned ? 0.72 + 0.16 * Math.sin(displayTime() * 8 + i)
                     : working ? 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(displayTime() * 11 + i))
                     : 0.18);
-            core.setScaleY(pinned
+            core.gear().setScaleY(pinned
                     ? 1 + 0.08 * Math.sin(displayTime() * 8 + i)
                     : working ? 1 + 0.045 * Math.sin(displayTime() * 11 + i) : 1);
-            core.setTranslateY(6 + (working && !pinned
+            core.gear().setTranslateY(6 + (working && !pinned
                     ? 0.45 * (0.5 + 0.5 * Math.sin(displayTime() * 11 + i)) : 0));
-            core.setRotate(pinned ? Math.sin(displayTime() * 8 + i) * 9
+            core.gear().setRotate(pinned ? Math.sin(displayTime() * 8 + i) * 9
                     : working ? displayTime() * 70 + i * 31 : 0);
             Cylinder pillar = carrierPillars.get(i);
             pillar.setMaterial(pinned ? coreActivityPinned

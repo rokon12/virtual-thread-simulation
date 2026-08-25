@@ -32,7 +32,7 @@ World units are abstract; keep the numbers below verbatim. **IMPORTANT:** the HT
 | Layer 2 · Scheduler slab | Box 150×3.5×50 @ y=52 | fill #150f2b, edge #a78bfa; rotating torus r=14 tube=0.9 @ y=56, spin 1.5 rad/s |
 | Layer 3 · Runnable deck | Box 170×3.5×66 @ y=78 | fill #0a2018, edge #34d399 |
 | Heap basket | Box 40×3.5×40 @ (118,30,0); open 36×44×36 wire rails above | edge #a78bfa; full-size parked VTs remain unobstructed inside |
-| Core i (i=0..C−1) | Box 12×8×12 @ (laneX(i), 6, 0) | laneX(i) = (i−(C−1)/2)·min(26,130/(C−1)); C=4 default, clamp 2–10 |
+| Core gear i (i=0..C−1) | Cylinder r=4.7 h=6.4 plus 12 radial teeth and dark axle @ (laneX(i), 6, 0) | laneX(i) = (i−(C−1)/2)·min(26,130/(C−1)); C=4 default, clamp 2–10; rotates only while working |
 | Carrier slot i | Torus r=6 tube=0.7 @ (laneX(i), 28.4, 0), flat | idle #24425f · occupied #60a5fa · pinned #f87171 + pulse scale ±8% @ 8 rad/s |
 | Lane pillar i | Cylinder r=0.5 h=26 @ (laneX(i), 15, 0) | dim blue at idle; bright amber work pulse while mounted; red stutter while pinned |
 | VT particle | Sphere r=1.9 (pool of maxThreads+40) | plus glow shell Sphere r=3.6, opacity .22 (see §5) |
@@ -42,7 +42,7 @@ World units are abstract; keep the numbers below verbatim. **IMPORTANT:** the HT
 | Task inlet | spawn (−70±8, 90+rnd·8, 24±8) | label "APPLICATION TASKS · SUBMIT ↓" |
 | Task ingress | open 34×23 submission tray at (−70,0,24) with three descending code cards | cards loop toward the runnable layer while work is active |
 | Stack-chunk marker | Box 5.4×1.15×2.5 accompanying a parking or resuming VT | appears as the continuation leaves a carrier, rests in the heap, and returns to a carrier |
-| Core activity rotor i | Torus r=7.6, three-blade rotor, front piston, and rising sparks @ (laneX(i),6,0) | surrounds the core; amber fast spin while working, dim at idle, slow red pulse while pinned |
+| Core activity i | Toothed core gear plus front piston and rising sparks @ (laneX(i),6,0) | amber rotation while working, dim at idle, slow red stutter while pinned |
 | External I/O | NETWORK / DISK / TIMER / DATABASE icons at x=160, y=78, z=−52..53 | a pulsing link and travelling signal connect each parked VT to its deterministic endpoint |
 | Queue-pressure bar | Box 130×2.4×5 along the runnable deck | left-anchored scale follows runnable count; pulses and says BACKPRESSURE when waiting work exceeds carrier count |
 
