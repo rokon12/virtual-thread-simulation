@@ -13,9 +13,11 @@ Keep the simulation model pure (no JavaFX imports) so it can be unit-tested; the
 | `vtmachine.model.Sim` | Pure model: tick(dt), spawn/mount/park/resume/pin/complete, chapter engine, event log ring buffer. No JavaFX types |
 | `vtmachine.model.Vt` | id, state, lifecycle phase/timers, external I/O endpoint, pos (double x,y,z), work/work0, io, carrier ref, hero flag, active tween |
 | `vtmachine.model.Carrier` | mounted Vt, pinT countdown, heat 0..1 |
+| `vtmachine.model.ReplayFrame` | Immutable copy of display-relevant model, carrier, lifecycle, resource-pool, scope, log, and HUD state |
+| `vtmachine.model.ReplayTimeline` | JavaFX-free rolling 360-frame history sampled every 0.15 simulated seconds; derives aggregated event markers |
 | `vtmachine.view.MachineScene` | SubScene + world Group: slabs, cores, slots, ring, heap, external I/O endpoints, queue pressure, VT/stack node pools, dissolve canvas, follow/comparison overlays, hero trail, labels |
 | `vtmachine.view.CameraRig` | Orbit spherical (theta, phi, dist, targetY), presets, mouse drag/scroll, lerp-to-goal |
-| `vtmachine.view.Hud` | Counters, key-behavior flash cards, event log, narration card, speed slider, buttons |
+| `vtmachine.view.Hud` | Counters, key-behavior flash cards, event log, narration card, replay scrubber/event markers, speed slider, buttons |
 
 Meta-note for the talk: the sim models virtual threads but should also *run on* them — feed the model from a real `Thread.ofVirtual()` executor if you want live data instead of the synthetic spawner (see §6.5).
 
@@ -97,8 +99,8 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 | Header | Pulsing green LED (1.6 s), title, GUIDED/FREE RUN toggle (ToggleGroup), status text BOOTING/RUNNING/PAUSED |
 | Right sidebar 290px | Counters include RUNNABLE, MOUNTED, PARKED, COMPLETED, live total, and utilization · task-profile mix · throughput graph · 4 behavior cards · event log, 7 clickable mono lines |
 | Narration card | Bottom-left 400px overlay: CHAPTER n/10, colored title, body text, ←/Next buttons. Chapter copy: §10 verbatim |
-| Bottom bar | Pause/Run · +25 tasks · Force park · Force pin · speed Slider + readout "0.75×" |
-| Keyboard | SPACE play/pause · ←/→ chapters · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480) |
+| Bottom bar | Pause/Run · +25 tasks · Force park · Force pin · replay scrubber with marker rail and LIVE return · speed Slider + readout "0.75×" |
+| Keyboard | SPACE live/replay play-pause · J/K history step · L return live · ←/→ chapters (or slider step while focused) · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480) |
 | Hover / follow | PickResult on the VT pool → tooltip; click a VT or log line to pin a lifecycle card showing RUNNABLE / MOUNTED / PARKED / TERMINATED durations |
 
 Type: Space Grotesk (UI) + IBM Plex Mono (data). Ship both as bundled TTFs via `Font.loadFont` — don't depend on system fonts on the conference machine.
@@ -346,6 +348,7 @@ Acceptance — matches the HTML reference sim when:
 - [ ] Pool limit: at most three DB permits are active; extra VTs remain parked and carriers continue draining work
 - [ ] CPU bound: all carriers stay busy, no tasks park, and the queue grows beyond the carrier count
 - [ ] Structured: three four-child scope trees render; CHECKOUT records one failure, cancels active siblings, and joins exceptionally
+- [ ] Replay: scrubbing pauses the live model and updates 3D/HUD/log/notes from immutable frames; playing advances recorded frames; LIVE restores the untouched live state and previous running/auto-play flags
 - [ ] Hero: exactly one trail at a time; new hero auto-picked after previous completes
 - [ ] Input: SPACE, ←/→, 1–4, drag orbit (φ clamped 0.15–1.45), scroll zoom (80–480), hover tooltip on any sphere
 - [ ] Determinism: same seed → identical event log across two runs
@@ -390,7 +393,8 @@ Camera goal lerp (every frame while a goal exists): `o.θ += (g.θ−o.θ)·0.06
 | Scroll | dist = clamp(dist + Δy·0.4, 80, 480); clear goal |
 | Pinch gesture | `ZoomEvent.ZOOM`: dist += −ln(zoomFactor)·420; clamp 80–480; clear goal |
 | Mouse move (not dragging) | pick → tooltip (§14); recheck every 3rd frame is fine |
-| SPACE | toggle running; playLabel "Pause"↔"Run"; status RUNNING↔PAUSED. Ignore when focus is in a text input |
+| SPACE | toggle live running, or replay playback while history is selected. Ignore when focus is in a text input |
+| J / K / L | previous replay frame / next replay frame / return to live edge |
 | ← / → | gotoChapter(current ∓/± 1) — wraps modulo 10 |
 | 1 / 2 / 3 / 4 | camera presets overview / carriers / heap / top |
 
@@ -409,7 +413,7 @@ Global: window bg `#070b12`; UI font Space Grotesk; data font IBM Plex Mono; all
 | Narration card | 400px wide, bottom-left inset 16; bg rgba(10,16,25,.88), border #1d2b3c, radius 12, padding 14 16, blur backdrop if cheap. Row: "CHAPTER n/10" mono 12px #7d8fa3 · title 17px/700 in chapter color · spacer · ← button 30×26 (bg #0e1826, border #26364a, fg #9db2c8) · "Next →" button h26 padding 0 12 (bg #0f2b21, border #2a5c48, fg #6ee7b7). Body 14px lh 1.55 #b6c6d8 |
 | Camera preset buttons | top-right inset 16/14, gap 6; mono 10px, padding 5 10, radius 6, bg rgba(14,24,38,.8), border #26364a, fg #9db2c8; labels OVERVIEW CARRIERS HEAP TOP |
 | Shortcut hint | bottom-right inset 16; mono 10px #5c7089; include presenter, quality, contrast, notes, and camera shortcuts. Drag orbits; scrolling and pinch gestures zoom. |
-| Bottom bar | padding 10 22, top border. Pause/Run: 13px/500, padding 8 18, radius 8, width 90, green set (bg #0f2b21/border #2a5c48/fg #6ee7b7). "+25 tasks": blue set (#0f1e30/#24425f/#93c5fd). "Force park": purple set (#191531/#3d3564/#c4b5fd). "Force pin": red set (#2b0f0f/#5c2a2a/#fca5a5). Right: "SPEED" mono 12px #7d8fa3 · slider w130 accent #34d399, range 0.25–3 step 0.25 default 0.75 · readout mono 12px #e6edf3 w44 "0.75×" (format %.2f×) |
+| Bottom bar | padding 10 22, top border. Pause/Run: 13px/500, padding 8 18, radius 8, width 90, green set. Task/park/pin/settings controls retain their chapter colors. Center: replay status, event legend, history slider + marker rail, LIVE button. Right: FPS, SPEED slider w130 range 0.25–3, and readout "0.75×". |
 | Hover tooltip | bg rgba(10,16,25,.92), border #2a3b52, radius 6, padding 5 9, mono 12px #cfe0f2, no wrap, offset cursor +14/+10 |
 
 ## 14 · Event Catalog + Tooltip Grammar (exhaustive)

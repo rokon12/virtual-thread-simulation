@@ -23,6 +23,7 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
+import javafx.scene.control.Slider;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.image.WritableImage;
@@ -34,6 +35,8 @@ import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
 import vtmachine.live.LiveWorkload;
+import vtmachine.model.ReplayFrame;
+import vtmachine.model.ReplayTimeline;
 import vtmachine.model.Sim;
 import vtmachine.view.CameraRig;
 import vtmachine.view.Hud;
@@ -49,6 +52,7 @@ public final class App extends Application {
     private MachineScene machine;
     private Hud hud;
     private LiveWorkload liveWorkload;
+    private ReplayTimeline replayTimeline;
     private SpeakerNotesWindow speakerNotes;
     private AnimationTimer timer;
     private int observedChapter;
@@ -61,6 +65,12 @@ public final class App extends Application {
     private boolean highContrast;
     private double chapterWallTime;
     private double fps = 60;
+    private boolean replaying;
+    private boolean replayPlaying;
+    private boolean runningBeforeReplay;
+    private boolean autoplayBeforeReplay;
+    private int replayIndex;
+    private double replayAccumulator;
 
     @Override
     public void start(Stage stage) {
@@ -106,14 +116,20 @@ public final class App extends Application {
             liveWorkload = null;
         }
         settings = replacement;
+        replaying = false;
+        replayPlaying = false;
+        replayAccumulator = 0;
         sim = new Sim(settings.carriers, settings.maxThreads, settings.taskRate, settings.seed);
         if (settings.live) sim.setLiveMode(true);
         if (settings.live) liveWorkload = new LiveWorkload(sim, settings.maxThreads, settings.taskRate, settings.seed);
+        replayTimeline = new ReplayTimeline();
+        replayTimeline.capture(sim, true);
         machine = new MachineScene(sim);
-        Hud.Actions actions = new Hud.Actions(this::gotoChapter, this::setFreeRun,
-                this::switchLiveMode, () -> submitTasks(25), sim::forcePark, sim::forcePin,
-                this::showSettings, machine::highlightVt, machine::requestFocus);
-        hud = new Hud(sim, actions);
+        Hud.Actions actions = new Hud.Actions(this::togglePlayPause, this::gotoChapter, this::setFreeRun,
+                this::switchLiveMode, () -> submitTasks(25), this::forcePark, this::forcePin,
+                this::showSettings, machine::highlightVt, this::showReplayFrame,
+                this::returnLive, machine::requestFocus);
+        hud = new Hud(sim, replayTimeline, actions);
         StackPane machineAndNarration = new StackPane(machine, hud.narration());
         StackPane.setAlignment(hud.narration(), Pos.BOTTOM_LEFT);
         StackPane.setMargin(hud.narration(), new Insets(0, 0, 16, 16));
@@ -125,6 +141,7 @@ public final class App extends Application {
         hud.setPresenterMode(presenterMode);
         machine.setPresenterMode(presenterMode);
         machine.setHighContrast(highContrast);
+        hud.syncTimeline(replayTimeline.size() - 1, false);
         observedChapter = sim.chapter();
         chapterWallTime = 0;
         if (speakerNotes != null) speakerNotes.setSim(sim);
@@ -144,7 +161,7 @@ public final class App extends Application {
                 double frameDt = last < 0 ? 0 : Math.min(0.05, (now - last) / 1_000_000_000.0);
                 last = now;
                 wallTime += frameDt;
-                chapterWallTime += frameDt;
+                if (!replaying) chapterWallTime += frameDt;
                 if (frameDt > 0) fps += (1 / frameDt - fps) * 0.075;
                 if (liveWorkload != null) liveWorkload.tick(frameDt, sim.running() && sim.freeRun());
                 if (sim.running()) {
@@ -170,13 +187,26 @@ public final class App extends Application {
                     int target = settings.snapshotChapter - 1;
                     if (sim.chapter() != target) gotoChapter(target);
                 }
+                if (!replaying && replayTimeline.capture(sim)) {
+                    hud.syncTimeline(replayTimeline.size() - 1, false);
+                }
+                if (replaying && replayPlaying) advanceReplay(frameDt);
                 machine.sync(frameDt);
                 if (++frame % 15 == 0) machine.setPerformance(fps, frameDt * 1_000);
                 hud.syncFrame(wallTime, fps, machine.qualityLabel());
-                if (frame % 10 == 0) hud.sync();
+                if (frame % 10 == 0) {
+                    hud.sync();
+                    hud.syncTimeline(replayIndex, replayPlaying);
+                }
                 speakerNotes.sync(wallTime, fps, autoplay);
                 if (!snapshotWritten && settings.snapshotPath != null && wallTime >= settings.snapshotAt) {
                     snapshotWritten = true;
+                    if (settings.snapshotReplay && replayTimeline.size() > 1) {
+                        showReplayFrame(Math.max(0, replayTimeline.size() - 14));
+                        machine.sync(0);
+                        appScene.getRoot().applyCss();
+                        appScene.getRoot().layout();
+                    }
                     if (settings.snapshotFollow && sim.hero() != null) {
                         machine.highlightVt(sim.hero().id());
                         machine.sync(0);
@@ -195,14 +225,24 @@ public final class App extends Application {
         scene.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, event -> {
             if (scene.getFocusOwner() instanceof TextInputControl) return;
             KeyCode code = event.getCode();
+            if (scene.getFocusOwner() instanceof Slider
+                    && (code == KeyCode.LEFT || code == KeyCode.RIGHT
+                            || code == KeyCode.HOME || code == KeyCode.END)) return;
             switch (code) {
                 case SPACE -> {
-                    sim.setRunning(!sim.running());
-                    hud.sync();
+                    togglePlayPause();
                     event.consume();
                 }
-                case LEFT -> { gotoChapter(sim.chapter() - 1); event.consume(); }
-                case RIGHT -> { gotoChapter(sim.chapter() + 1); event.consume(); }
+                case LEFT -> {
+                    int chapter = replaying ? replayTimeline.frame(replayIndex).chapter() : sim.chapter();
+                    gotoChapter(chapter - 1);
+                    event.consume();
+                }
+                case RIGHT -> {
+                    int chapter = replaying ? replayTimeline.frame(replayIndex).chapter() : sim.chapter();
+                    gotoChapter(chapter + 1);
+                    event.consume();
+                }
                 case DIGIT0, NUMPAD0 -> machine.cameraPreset(CameraRig.Preset.OVERVIEW);
                 case DIGIT1, NUMPAD1 -> machine.cameraPreset(CameraRig.Preset.OVERVIEW);
                 case DIGIT2, NUMPAD2 -> machine.cameraPreset(CameraRig.Preset.CARRIERS);
@@ -211,16 +251,29 @@ public final class App extends Application {
                 case F11 -> stage.setFullScreen(!stage.isFullScreen());
                 case P -> setPresenterMode(!presenterMode);
                 case A -> {
+                    if (replaying) returnLive();
                     autoplay = !autoplay;
                     chapterWallTime = 0;
                     sim.recordMessage("auto-play " + (autoplay ? "enabled" : "disabled"));
                 }
                 case R -> gotoChapter(sim.chapter());
-                case Q -> sim.recordMessage("render quality: " + machine.cycleQuality());
+                case Q -> {
+                    String quality = machine.cycleQuality();
+                    if (!replaying) sim.recordMessage("render quality: " + quality);
+                }
                 case H -> setHighContrast(!highContrast);
                 case N -> speakerNotes.toggle();
+                case J -> {
+                    int start = replaying ? replayIndex : replayTimeline.size() - 1;
+                    showReplayFrame(start - 1);
+                }
+                case K -> {
+                    if (replaying) showReplayFrame(replayIndex + 1);
+                }
+                case L -> returnLive();
                 case ESCAPE -> {
-                    if (presenterMode) setPresenterMode(false);
+                    if (replaying) returnLive();
+                    else if (presenterMode) setPresenterMode(false);
                     else machine.clearFollow();
                 }
                 default -> { }
@@ -228,22 +281,109 @@ public final class App extends Application {
         });
     }
 
+    private void togglePlayPause() {
+        if (replaying) {
+            replayPlaying = !replayPlaying;
+            replayAccumulator = 0;
+            hud.setReplayFrame(replayTimeline.frame(replayIndex), replayPlaying);
+            hud.syncTimeline(replayIndex, replayPlaying);
+            return;
+        }
+        sim.setRunning(!sim.running());
+        hud.sync();
+    }
+
+    private void showReplayFrame(int requestedIndex) {
+        if (replayTimeline.size() == 0) return;
+        if (!replaying) {
+            runningBeforeReplay = sim.running();
+            autoplayBeforeReplay = autoplay;
+            sim.setRunning(false);
+            autoplay = false;
+            replaying = true;
+            replayPlaying = false;
+            replayAccumulator = 0;
+        }
+        replayIndex = Math.max(0, Math.min(requestedIndex, replayTimeline.size() - 1));
+        ReplayFrame frame = replayTimeline.frame(replayIndex);
+        machine.setReplayFrame(frame);
+        hud.setReplayFrame(frame, replayPlaying);
+        if (speakerNotes != null) speakerNotes.setReplayFrame(frame);
+        hud.syncTimeline(replayIndex, replayPlaying);
+    }
+
+    private void advanceReplay(double frameDt) {
+        replayAccumulator += frameDt * sim.speed();
+        while (replayIndex < replayTimeline.size() - 1) {
+            double currentTime = replayTimeline.frame(replayIndex).time();
+            double nextTime = replayTimeline.frame(replayIndex + 1).time();
+            double delay = Math.max(0.04, nextTime - currentTime);
+            if (replayAccumulator < delay) break;
+            replayAccumulator -= delay;
+            showReplayFrame(replayIndex + 1);
+        }
+        if (replayIndex >= replayTimeline.size() - 1) {
+            replayPlaying = false;
+            replayAccumulator = 0;
+            hud.setReplayFrame(replayTimeline.frame(replayIndex), false);
+            hud.syncTimeline(replayIndex, false);
+        }
+    }
+
+    private void returnLive() {
+        if (!replaying) return;
+        replaying = false;
+        replayPlaying = false;
+        replayAccumulator = 0;
+        replayIndex = Math.max(0, replayTimeline.size() - 1);
+        machine.clearReplayFrame();
+        hud.clearReplayFrame();
+        if (speakerNotes != null) speakerNotes.clearReplayFrame();
+        sim.setRunning(runningBeforeReplay);
+        autoplay = autoplayBeforeReplay;
+        hud.sync();
+        hud.syncTimeline(replayIndex, false);
+    }
+
     private void submitTasks(int count) {
+        if (replaying) returnLive();
         if (liveWorkload != null) liveWorkload.submit(count);
         else sim.burst(count);
+        captureReplayNow();
+    }
+
+    private void forcePark() {
+        if (replaying) returnLive();
+        sim.forcePark();
+        captureReplayNow();
+    }
+
+    private void forcePin() {
+        if (replaying) returnLive();
+        sim.forcePin();
+        captureReplayNow();
     }
 
     private void setFreeRun(boolean enabled) {
+        if (replaying) returnLive();
         sim.setFreeRun(enabled);
+        captureReplayNow();
+    }
+
+    private void captureReplayNow() {
+        replayTimeline.capture(sim, true);
+        hud.syncTimeline(replayTimeline.size() - 1, false);
     }
 
     private void switchLiveMode(boolean enabled) {
+        if (replaying) returnLive();
         if (sim.liveMode() == enabled) return;
         rebuild(settings.withLive(enabled));
         machine.requestFocus();
     }
 
     private void gotoChapter(int chapter) {
+        if (replaying) returnLive();
         sim.gotoChapter(chapter);
         observedChapter = sim.chapter();
         chapterWallTime = 0;
@@ -265,10 +405,11 @@ public final class App extends Application {
         shell.getStyleClass().remove("high-contrast");
         if (enabled) shell.getStyleClass().add("high-contrast");
         machine.setHighContrast(enabled);
-        sim.recordMessage("high contrast " + (enabled ? "enabled" : "disabled"));
+        if (!replaying) sim.recordMessage("high contrast " + (enabled ? "enabled" : "disabled"));
     }
 
     private void showSettings() {
+        if (replaying) returnLive();
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.initOwner(stage);
         dialog.setTitle("Demo settings");
@@ -298,7 +439,7 @@ public final class App extends Application {
             try { selectedSeed = Long.parseLong(seed.getText().trim()); }
             catch (NumberFormatException invalid) { selectedSeed = settings.seed; }
             rebuild(new Settings(carriers.getValue(), maxThreads.getValue(), taskRate.getValue(),
-                    selectedSeed, live.isSelected(), settings.presenter, null, 4.5, 0, false));
+                    selectedSeed, live.isSelected(), settings.presenter, null, 4.5, 0, false, false));
             machine.requestFocus();
         });
     }
@@ -359,10 +500,10 @@ public final class App extends Application {
 
     record Settings(int carriers, int maxThreads, double taskRate, long seed,
             boolean live, boolean presenter, String snapshotPath, double snapshotAt,
-            int snapshotChapter, boolean snapshotFollow) {
+            int snapshotChapter, boolean snapshotFollow, boolean snapshotReplay) {
         Settings withLive(boolean enabled) {
             return new Settings(carriers, maxThreads, taskRate, seed, enabled, presenter,
-                    snapshotPath, snapshotAt, snapshotChapter, snapshotFollow);
+                    snapshotPath, snapshotAt, snapshotChapter, snapshotFollow, snapshotReplay);
         }
 
         static Settings from(List<String> args) {
@@ -383,7 +524,8 @@ public final class App extends Application {
                     values.get("snapshot"),
                     boundedDouble(values.get("snapshot-at"), 4.5, 0.5, 30.0),
                     boundedInt(values.get("snapshot-chapter"), 0, 0, Sim.CHAPTER_COUNT),
-                    Boolean.parseBoolean(values.getOrDefault("snapshot-follow", "false")));
+                    Boolean.parseBoolean(values.getOrDefault("snapshot-follow", "false")),
+                    Boolean.parseBoolean(values.getOrDefault("snapshot-replay", "false")));
         }
 
         private static int boundedInt(String value, int fallback, int min, int max) {

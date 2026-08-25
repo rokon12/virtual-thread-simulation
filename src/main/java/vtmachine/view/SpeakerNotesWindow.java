@@ -11,6 +11,7 @@ import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import vtmachine.model.Sim;
+import vtmachine.model.ReplayFrame;
 
 /** Optional second-screen confidence monitor for conference presentations. */
 public final class SpeakerNotesWindow {
@@ -22,6 +23,7 @@ public final class SpeakerNotesWindow {
     private final Label timer = new Label();
     private final ProgressBar progress = new ProgressBar();
     private Sim sim;
+    private ReplayFrame replayFrame;
 
     public SpeakerNotesWindow(Window owner, Sim sim, String stylesheet) {
         this.sim = sim;
@@ -61,26 +63,32 @@ public final class SpeakerNotesWindow {
 
     public void sync(double elapsedSeconds, double fps, boolean autoplay) {
         if (!stage.isShowing()) return;
-        int selected = sim.chapter();
-        Sim.Stats stats = sim.stats();
-        Sim.ProfileStats mix = sim.profileStats();
+        int selected = replayFrame == null ? sim.chapter() : replayFrame.chapter();
+        Sim.Stats stats = replayFrame == null ? sim.stats() : replayFrame.stats();
+        Sim.ProfileStats mix = replayFrame == null ? sim.profileStats() : replayFrame.profileStats();
+        int liveCount = replayFrame == null ? sim.vts().size() : replayFrame.vts().size();
+        boolean liveMode = replayFrame == null ? sim.liveMode() : replayFrame.liveMode();
+        int carriers = replayFrame == null ? sim.carriers().size() : replayFrame.carriers().size();
+        double averageIo = replayFrame == null ? sim.averageIoSeconds() : replayFrame.averageIoSeconds();
         timer.setText("%02d:%02d  ·  %s  ·  %.0f FPS".formatted(
                 (int) elapsedSeconds / 60, (int) elapsedSeconds % 60,
-                autoplay ? "AUTO-PLAY" : "MANUAL", fps));
+                replayFrame != null ? "REPLAY" : autoplay ? "AUTO-PLAY" : "MANUAL", fps));
         chapter.setText((selected + 1) + "/" + Sim.CHAPTER_COUNT + "  " + Hud.chapterTitle(selected));
         body.setText(Hud.chapterText(selected));
         next.setText("NEXT → " + Hud.chapterTitle(selected + 1) + "\n"
                 + Hud.chapterText(selected + 1));
         metrics.setText("feed %s  ·  live %d  ·  runnable %d  ·  mounted %d/%d  ·  parked %d  ·  completed %d  ·  avg I/O %.1fs\n"
-                .formatted(sim.liveMode() ? "LIVE JDK" : "SYNTHETIC", sim.vts().size(),
-                        stats.runnable(), stats.mounted(), sim.carriers().size(), stats.parked(),
-                        stats.completed(), sim.averageIoSeconds())
+                .formatted(liveMode ? "LIVE JDK" : "SYNTHETIC", liveCount,
+                        stats.runnable(), stats.mounted(), carriers, stats.parked(),
+                        stats.completed(), averageIo)
                 + "task mix: " + mix.fast() + " fast · " + mix.compute() + " compute · "
                 + mix.ioBound() + " I/O-bound\n"
                 + "Keys: ←/→ chapter · Space pause · P presenter · A auto · 0 overview · Q quality · H contrast");
         progress.setProgress((selected + 1) / (double) Sim.CHAPTER_COUNT);
     }
 
-    public void setSim(Sim sim) { this.sim = sim; }
+    public void setSim(Sim sim) { this.sim = sim; replayFrame = null; }
+    public void setReplayFrame(ReplayFrame replayFrame) { this.replayFrame = replayFrame; }
+    public void clearReplayFrame() { replayFrame = null; }
     public void close() { stage.close(); }
 }

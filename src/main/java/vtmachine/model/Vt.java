@@ -10,7 +10,7 @@ import static vtmachine.model.Sim.VtState;
 import static vtmachine.model.Sim.TaskProfile;
 
 /** Mutable virtual-thread state owned exclusively by {@link Sim}. */
-public final class Vt {
+public final class Vt implements ThreadView {
     final long id;
     VtState state;
     final Vec3 pos;
@@ -59,6 +59,9 @@ public final class Vt {
     public long id() { return id; }
     public VtState state() { return state; }
     public Vec3 pos() { return pos; }
+    public double x() { return pos.x; }
+    public double y() { return pos.y; }
+    public double z() { return pos.z; }
     public double work() { return work; }
     public double work0() { return work0; }
     public TaskProfile profile() { return profile; }
@@ -74,6 +77,8 @@ public final class Vt {
     public Outcome outcome() { return outcome; }
     public boolean resourcePermit() { return resourcePermit; }
     public boolean waitingForPermit() { return waitingForPermit; }
+    public int carrierIndex() { return carrier == null ? -1 : carrier.index(); }
+    public boolean carrierPinned() { return carrier != null && carrier.pinned(); }
     public boolean isTweening() { return tween != null; }
     public LifecyclePhase lifecyclePhase() { return lifecyclePhase; }
 

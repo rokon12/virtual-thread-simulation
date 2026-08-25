@@ -41,10 +41,10 @@ import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
 import javafx.scene.transform.Rotate;
 import javafx.scene.transform.Scale;
-import vtmachine.model.Carrier;
+import vtmachine.model.ReplayFrame;
 import vtmachine.model.Sim;
+import vtmachine.model.ThreadView;
 import vtmachine.model.Vec3;
-import vtmachine.model.Vt;
 
 /** The complete 3D machine, its projected labels, tooltip, and camera controls. */
 public final class MachineScene extends StackPane {
@@ -99,7 +99,7 @@ public final class MachineScene extends StackPane {
     private final List<Label> externalIoLabels = new ArrayList<>();
     private final List<Box> databasePermitSlots = new ArrayList<>();
     private final List<Sphere> trail = new ArrayList<>();
-    private final Map<Node, Vt> pickedVts = new IdentityHashMap<>();
+    private final Map<Node, ThreadView> pickedVts = new IdentityHashMap<>();
     private final EnumMap<VtColor, PhongMaterial> materials = new EnumMap<>(VtColor.class);
     private final EnumMap<VtColor, PhongMaterial> glowMaterials = new EnumMap<>(VtColor.class);
     private final EnumMap<Sim.IoDevice, Vec3> ioEndpoints = new EnumMap<>(Sim.IoDevice.class);
@@ -125,8 +125,10 @@ public final class MachineScene extends StackPane {
     private Label heroLabel;
     private Label databasePoolLabel;
     private long heroId = -1;
-    private Vt followedVt;
-    private Vt pressedVt;
+    private ThreadView followedVt;
+    private long followedId = -1;
+    private ThreadView pressedVt;
+    private ReplayFrame replayFrame;
     private double pressX;
     private double pressY;
     private double displayedQueuePressure;
@@ -181,7 +183,7 @@ public final class MachineScene extends StackPane {
         buildTrail();
 
         cameraButtons = buildCameraButtons();
-        shortcut = new Label("SPACE pause · ← → chapters · P present · A auto · Q quality · H contrast · N notes");
+        shortcut = new Label("SPACE play/pause · J/K replay · L live · ← → chapters · P present · A auto · N notes");
         shortcut.getStyleClass().add("shortcut-hint");
         shortcut.setMouseTransparent(true);
         diagnostics.getStyleClass().add("diagnostics-label");
@@ -215,6 +217,7 @@ public final class MachineScene extends StackPane {
         close.setAccessibleText("Stop following this virtual thread");
         close.setOnAction(event -> {
             followedVt = null;
+            followedId = -1;
             followOverlay.setVisible(false);
             requestFocus();
         });
@@ -631,7 +634,7 @@ public final class MachineScene extends StackPane {
             if (dragging) camera.drag(event.getSceneX(), event.getSceneY());
         });
         subScene.addEventHandler(MouseEvent.MOUSE_RELEASED, event -> {
-            Vt clicked = !dragging ? pressedVt : null;
+            ThreadView clicked = !dragging ? pressedVt : null;
             endDrag();
             pressedVt = null;
             if (clicked != null) follow(clicked);
@@ -659,12 +662,12 @@ public final class MachineScene extends StackPane {
 
     private void showTooltip(MouseEvent event) {
         if (dragging) return;
-        Vt vt = pickedVts.get(event.getPickResult().getIntersectedNode());
+        ThreadView vt = pickedVts.get(event.getPickResult().getIntersectedNode());
         if (vt == null) {
             tooltip.setVisible(false);
             return;
         }
-        int carrierIndex = vt.carrier() == null ? -1 : vt.carrier().index();
+        int carrierIndex = vt.carrierIndex();
         int progress = vt.work0() == 0 ? 0 : (int) Math.round((1 - vt.work() / vt.work0()) * 100);
         progress = Math.max(0, Math.min(100, progress));
         String text = "VT-" + vt.id() + " · " + vt.profile().display() + " · " + vt.state().display()
@@ -688,8 +691,8 @@ public final class MachineScene extends StackPane {
 
     public void sync(double dt) {
         syncBoot();
-        schedulerRing.setRotate(sim.time() * 1.5 * 180 / Math.PI);
-        double schedulerRise = clamp((sim.bootT() - 1.0) / 0.5, 0, 1);
+        schedulerRing.setRotate(displayTime() * 1.5 * 180 / Math.PI);
+        double schedulerRise = clamp((displayBootT() - 1.0) / 0.5, 0, 1);
         schedulerRing.setMaterial(schedulerRise > 0.6 ? schedulerBright : schedulerDim);
         syncCarriers();
         syncQueuePressure(dt);
@@ -707,20 +710,21 @@ public final class MachineScene extends StackPane {
 
     private void syncBoot() {
         for (BootLayer layer : bootLayers) {
-            double amount = clamp((sim.bootT() - layer.order * 0.5) / 0.5, 0, 1);
+            double amount = clamp((displayBootT() - layer.order * 0.5) / 0.5, 0, 1);
             layer.group.setTranslateY(layer.restY - (1 - amount) * 18);
             if (layer.order == 4) heapGhost.setOpacity(amount * 0.22);
         }
     }
 
     private void syncCarriers() {
-        for (int i = 0; i < sim.carriers().size(); i++) {
-            Carrier carrier = sim.carriers().get(i);
-            boolean pinned = carrier.pinned();
-            int heatLevel = (int) Math.round(clamp(carrier.heat(), 0, 1) * (coreHeatMaterials.size() - 1));
+        for (int i = 0; i < displayCarrierCount(); i++) {
+            boolean pinned = displayCarrierPinned(i);
+            int heatLevel = (int) Math.round(clamp(displayCarrierHeat(i), 0, 1)
+                    * (coreHeatMaterials.size() - 1));
             cores.get(i).setMaterial(pinned ? pinnedCore : coreHeatMaterials.get(heatLevel));
-            slots.get(i).setMaterial(pinned ? pinnedSlot : carrier.mounted() == null ? idleSlot : activeSlot);
-            double scale = pinned ? 1 + Math.sin(sim.time() * 8) * 0.08 : 1;
+            slots.get(i).setMaterial(pinned ? pinnedSlot
+                    : displayCarrierMounted(i) ? activeSlot : idleSlot);
+            double scale = pinned ? 1 + Math.sin(displayTime() * 8) * 0.08 : 1;
             slots.get(i).setScaleX(scale);
             slots.get(i).setScaleY(scale);
             slots.get(i).setScaleZ(scale);
@@ -729,24 +733,25 @@ public final class MachineScene extends StackPane {
     }
 
     private void syncQueuePressure(double dt) {
-        int waiting = sim.stats().runnable();
-        int lanes = Math.max(1, sim.carriers().size());
+        int waiting = displayStats().runnable();
+        int lanes = Math.max(1, displayCarrierCount());
         double target = clamp(waiting / (lanes * 8.0), 0, 1);
         displayedQueuePressure += (target - displayedQueuePressure) * Math.min(1, dt * 6);
         double scale = Math.max(0.025, displayedQueuePressure);
         queuePressureBar.setScaleX(scale);
         queuePressureBar.setTranslateX(-65 + 65 * scale);
         queuePressureBar.setScaleY(waiting > lanes
-                ? 1 + 0.18 * Math.sin(sim.time() * 7) : 1);
-        queuePressureBar.setVisible(sim.bootT() >= 3 && waiting > 0);
+                ? 1 + 0.18 * Math.sin(displayTime() * 7) : 1);
+        queuePressureBar.setVisible(displayBootT() >= 3 && waiting > 0);
         queuePressureBar.setOpacity(0.25 + displayedQueuePressure * 0.75);
         String pressure = waiting == 0 ? "EMPTY"
                 : waiting > lanes ? waiting + " WAITING · BACKPRESSURE"
                 : waiting + " READY";
         queuePressureLabel.setText("RUN QUEUE · " + pressure);
         queuePressureLabel.setVisible(waiting > 0);
-        externalIoVisible = sim.freeRun() || sim.chapter() == 2 || sim.chapter() == 3
-                || sim.chapter() == 5 || sim.chapter() == 6 || sim.chapter() == 7 || sim.chapter() == 9;
+        int chapter = displayChapter();
+        externalIoVisible = displayFreeRun() || chapter == 2 || chapter == 3
+                || chapter == 5 || chapter == 6 || chapter == 7 || chapter == 9;
         heapLabel.setVisible(externalIoVisible);
         for (Node node : externalIoNodes) node.setVisible(externalIoVisible);
         for (Label label : externalIoLabels) label.setVisible(externalIoVisible);
@@ -755,7 +760,7 @@ public final class MachineScene extends StackPane {
     private void syncParticles() {
         pickedVts.clear();
         int index = 0;
-        for (Vt vt : sim.vts()) {
+        for (ThreadView vt : displayVts()) {
             if (index >= particles.size()) break;
             Sphere particle = particles.get(index);
             Sphere glow = glows.get(index);
@@ -766,20 +771,20 @@ public final class MachineScene extends StackPane {
             VtColor color = colorFor(vt);
             double scale = scaleFor(vt);
             boolean terminating = vt.state() == Sim.VtState.DONE || vt.state() == Sim.VtState.DEAD;
-            double dissolve = terminating ? clamp(vt.lifecycleAge(sim.time()) / 1.35, 0, 1) : 0;
+            double dissolve = terminating ? clamp(vt.lifecycleAge(displayTime()) / 1.35, 0, 1) : 0;
             double opacity = terminating ? Math.pow(1 - dissolve, 1.4) : 1;
-            setPosition(particle, vt.pos());
-            setPosition(glow, vt.pos());
+            setPosition(particle, vt);
+            setPosition(glow, vt);
             particle.setScaleX(scale);
             particle.setScaleY(scale);
             particle.setScaleZ(scale);
             glow.setScaleX(scale * 1.15);
             glow.setScaleY(scale * 1.15);
             glow.setScaleZ(scale * 1.15);
-            ioMarker.setTranslateX(vt.pos().x + 3.0 * scale);
-            ioMarker.setTranslateY(vt.pos().y + 2.3 * scale
-                    + Math.sin(sim.time() * 5 + vt.id()) * 0.7);
-            ioMarker.setTranslateZ(vt.pos().z);
+            ioMarker.setTranslateX(vt.x() + 3.0 * scale);
+            ioMarker.setTranslateY(vt.y() + 2.3 * scale
+                    + Math.sin(displayTime() * 5 + vt.id()) * 0.7);
+            ioMarker.setTranslateZ(vt.z());
             particle.setMaterial(materials.get(color));
             glow.setMaterial(glowMaterials.get(color));
             particle.setOpacity(opacity);
@@ -790,7 +795,7 @@ public final class MachineScene extends StackPane {
             boolean important = vt.hero() || waiting
                     || vt == followedVt
                     || vt.state() == Sim.VtState.RUNNING || vt.state() == Sim.VtState.MOUNTING
-                    || (vt.carrier() != null && vt.carrier().pinned());
+                    || vt.carrierPinned();
             glow.setVisible(opacity > 0.02 && (detail || important));
             boolean ioBound = vt.profile() == Sim.TaskProfile.IO_BOUND;
             ioMarker.setVisible(!terminating && ioBound && !waiting && (detail || important || index % 4 == 0));
@@ -799,10 +804,10 @@ public final class MachineScene extends StackPane {
                 case TO_QUEUE, QUEUED, MOUNTING -> true;
                 default -> false;
             };
-            stackChunk.setTranslateX(vt.pos().x - 0.8);
-            stackChunk.setTranslateY(vt.pos().y - 3.2);
-            stackChunk.setTranslateZ(vt.pos().z + 2.4);
-            stackChunk.setRotate(Math.sin(sim.time() * 4 + vt.id()) * 12);
+            stackChunk.setTranslateX(vt.x() - 0.8);
+            stackChunk.setTranslateY(vt.y() - 3.2);
+            stackChunk.setTranslateZ(vt.z() + 2.4);
+            stackChunk.setRotate(Math.sin(displayTime() * 4 + vt.id()) * 12);
             stackChunk.setOpacity(waiting ? 1 : 0.72);
             stackChunk.setVisible(stackInTransit && (detail || important));
 
@@ -813,14 +818,14 @@ public final class MachineScene extends StackPane {
             if (connected) {
                 ioLink.setMaterial(vt.resourcePermit() ? resourceLinkMaterial : ioLinkMaterial);
                 ioSignal.setMaterial(materials.get(vt.resourcePermit() ? VtColor.GREEN : VtColor.PURPLE));
-                setCylinderBetween(ioLink, vt.pos().x, vt.pos().y, vt.pos().z,
+                setCylinderBetween(ioLink, vt.x(), vt.y(), vt.z(),
                         endpoint.x, endpoint.y, endpoint.z);
-                ioLink.setOpacity(0.22 + 0.20 * (0.5 + 0.5 * Math.sin(sim.time() * 5 + vt.id())));
-                double signalT = (sim.time() * 0.72 + vt.id() * 0.071) % 1.0;
-                ioSignal.setTranslateX(lerp(vt.pos().x, endpoint.x, signalT));
-                ioSignal.setTranslateY(lerp(vt.pos().y, endpoint.y, signalT)
+                ioLink.setOpacity(0.22 + 0.20 * (0.5 + 0.5 * Math.sin(displayTime() * 5 + vt.id())));
+                double signalT = (displayTime() * 0.72 + vt.id() * 0.071) % 1.0;
+                ioSignal.setTranslateX(lerp(vt.x(), endpoint.x, signalT));
+                ioSignal.setTranslateY(lerp(vt.y(), endpoint.y, signalT)
                         + Math.sin(Math.PI * signalT) * 6);
-                ioSignal.setTranslateZ(lerp(vt.pos().z, endpoint.z, signalT));
+                ioSignal.setTranslateZ(lerp(vt.z(), endpoint.z, signalT));
             }
             pickedVts.put(particle, vt);
             index++;
@@ -837,7 +842,7 @@ public final class MachineScene extends StackPane {
         }
     }
 
-    private VtColor colorFor(Vt vt) {
+    private VtColor colorFor(ThreadView vt) {
         if (vt.state() == Sim.VtState.DONE || vt.state() == Sim.VtState.DEAD) {
             return switch (vt.outcome()) {
                 case FAILED -> VtColor.RED;
@@ -847,30 +852,30 @@ public final class MachineScene extends StackPane {
         }
         return switch (vt.state()) {
             case TO_QUEUE, QUEUED -> VtColor.GREEN;
-            case MOUNTING, RUNNING -> vt.carrier() != null && vt.carrier().pinned()
+            case MOUNTING, RUNNING -> vt.carrierPinned()
                     ? VtColor.RED : VtColor.BLUE;
             case PARKING, PARKED -> VtColor.PURPLE;
             case DONE, DEAD -> VtColor.WHITE;
         };
     }
 
-    private double scaleFor(Vt vt) {
+    private double scaleFor(ThreadView vt) {
         double scale = switch (vt.state()) {
-            case RUNNING -> 1.5 + 0.12 * Math.sin(sim.time() * 7 + vt.id());
+            case RUNNING -> 1.5 + 0.12 * Math.sin(displayTime() * 7 + vt.id());
             case MOUNTING -> 1.5;
-            case PARKING, PARKED -> 1.15 + 0.08 * Math.sin(sim.time() * 5 + vt.id());
-            case DONE, DEAD -> 1.35 - clamp(vt.lifecycleAge(sim.time()) / 1.35, 0, 1) * 0.85;
+            case PARKING, PARKED -> 1.15 + 0.08 * Math.sin(displayTime() * 5 + vt.id());
+            case DONE, DEAD -> 1.35 - clamp(vt.lifecycleAge(displayTime()) / 1.35, 0, 1) * 0.85;
             default -> 1;
         };
         if (vt.hero()) scale *= 1.45;
         if (vt == followedVt) {
-            scale *= 1.85 + 0.12 * Math.sin(sim.time() * 12);
+            scale *= 1.85 + 0.12 * Math.sin(displayTime() * 12);
         }
         return scale;
     }
 
     private void syncHero() {
-        Vt hero = sim.hero();
+        ThreadView hero = displayHero();
         if (hero == null) {
             trail.forEach(node -> node.setVisible(false));
             heroLabel.setVisible(false);
@@ -891,25 +896,25 @@ public final class MachineScene extends StackPane {
             current.setVisible(true);
         }
         Sphere head = trail.getLast();
-        setPosition(head, hero.pos());
+        setPosition(head, hero);
         head.setVisible(true);
 
         ProjectedLabel heroProjection = projectedLabels.getLast();
-        heroProjection.anchor.setTranslateX(hero.pos().x);
-        heroProjection.anchor.setTranslateY(hero.pos().y + 8);
-        heroProjection.anchor.setTranslateZ(hero.pos().z);
+        heroProjection.anchor.setTranslateX(hero.x());
+        heroProjection.anchor.setTranslateY(hero.y() + 8);
+        heroProjection.anchor.setTranslateZ(hero.z());
         heroLabel.setVisible(true);
     }
 
     private void syncParkedBadges() {
         int parked = 0;
         int badgeIndex = 0;
-        for (Vt vt : sim.vts()) {
+        for (ThreadView vt : displayVts()) {
             if (vt.state() != Sim.VtState.PARKED) continue;
             parked++;
             if (badgeIndex >= parkedBadges.size()) continue;
             Label badge = parkedBadges.get(badgeIndex++);
-            Point3D scenePoint = world.localToScene(vt.pos().x, vt.pos().y + 3.6, vt.pos().z, true);
+            Point3D scenePoint = world.localToScene(vt.x(), vt.y() + 3.6, vt.z(), true);
             Point3D local = labelOverlay.sceneToLocal(scenePoint);
             if (!Double.isFinite(local.getX()) || !Double.isFinite(local.getY())) {
                 badge.setVisible(false);
@@ -925,7 +930,7 @@ public final class MachineScene extends StackPane {
             badge.setVisible(true);
         }
         for (int i = badgeIndex; i < parkedBadges.size(); i++) parkedBadges.get(i).setVisible(false);
-        int parkedTotal = sim.stats().parked();
+        int parkedTotal = displayStats().parked();
         heapLabel.setText("HEAP · " + parkedTotal + " PARKED STACK CHUNK" + (parkedTotal == 1 ? "" : "S")
                 + " · I/O EXTERNAL");
     }
@@ -933,10 +938,10 @@ public final class MachineScene extends StackPane {
     private void syncTerminationEffects() {
         GraphicsContext graphics = terminationCanvas.getGraphicsContext2D();
         graphics.clearRect(0, 0, terminationCanvas.getWidth(), terminationCanvas.getHeight());
-        for (Vt vt : sim.vts()) {
+        for (ThreadView vt : displayVts()) {
             if (vt.state() != Sim.VtState.DONE) continue;
-            double progress = clamp(vt.lifecycleAge(sim.time()) / 1.35, 0, 1);
-            Point3D scenePoint = world.localToScene(vt.pos().x, vt.pos().y, vt.pos().z, true);
+            double progress = clamp(vt.lifecycleAge(displayTime()) / 1.35, 0, 1);
+            Point3D scenePoint = world.localToScene(vt.x(), vt.y(), vt.z(), true);
             Point3D local = terminationCanvas.sceneToLocal(scenePoint);
             if (!Double.isFinite(local.getX()) || !Double.isFinite(local.getY())) continue;
             double alpha = Math.pow(1 - progress, 1.3);
@@ -964,22 +969,22 @@ public final class MachineScene extends StackPane {
             followOverlay.setVisible(false);
             return;
         }
-        Vt vt = followedVt;
+        ThreadView vt = followedVt;
         followOverlay.setVisible(true);
         followTitle.setText("FOLLOWING VT-" + vt.id() + " · " + vt.profile().display());
         int index = 0;
         for (Sim.LifecyclePhase phase : Sim.LifecyclePhase.values()) {
             Label label = followDurations[index++];
             label.setText(phase.display() + "\n"
-                    + String.format(Locale.ROOT, "%.1fs", vt.lifecycleSeconds(phase, sim.time())));
+                    + String.format(Locale.ROOT, "%.1fs", vt.lifecycleSeconds(phase, displayTime())));
             label.getStyleClass().remove("follow-current");
             if (phase == vt.lifecyclePhase()) label.getStyleClass().add("follow-current");
         }
         String detail = switch (vt.lifecyclePhase()) {
             case RUNNABLE -> "Waiting in the scheduler run queue";
-            case MOUNTED -> vt.carrier() == null ? "Moving onto a carrier"
-                    : "Executing on carrier C" + (vt.carrier().index() + 1)
-                            + (vt.carrier().pinned() ? " · PINNED" : "");
+            case MOUNTED -> vt.carrierIndex() < 0 ? "Moving onto a carrier"
+                    : "Executing on carrier C" + (vt.carrierIndex() + 1)
+                            + (vt.carrierPinned() ? " · PINNED" : "");
             case PARKED -> "Stack chunks stored in heap · waiting on "
                     + (vt.ioDevice() == null ? "external I/O" : vt.ioDevice().display())
                     + (vt.live() ? "" : " · " + String.format(Locale.ROOT, "%.1fs left", Math.max(0, vt.io())));
@@ -993,30 +998,30 @@ public final class MachineScene extends StackPane {
     }
 
     private void syncComparisonOverlay() {
-        boolean parkMoment = sim.chapter() == 2;
-        boolean pinMoment = sim.chapter() == 4;
+        boolean parkMoment = displayChapter() == 2;
+        boolean pinMoment = displayChapter() == 4;
         comparisonOverlay.setVisible(parkMoment || pinMoment);
         comparisonParkCard.getStyleClass().remove("comparison-active");
         comparisonPinCard.getStyleClass().remove("comparison-active");
         if (parkMoment) comparisonParkCard.getStyleClass().add("comparison-active");
         if (pinMoment) comparisonPinCard.getStyleClass().add("comparison-active");
         int pinned = 0;
-        for (Carrier carrier : sim.carriers()) if (carrier.pinned()) pinned++;
-        int waiting = sim.stats().runnable();
-        comparisonParkValue.setText("carrier released\n" + sim.stats().parked()
-                + " stack" + (sim.stats().parked() == 1 ? "" : "s") + " in heap · " + waiting + " queued");
+        for (int i = 0; i < displayCarrierCount(); i++) if (displayCarrierPinned(i)) pinned++;
+        int waiting = displayStats().runnable();
+        comparisonParkValue.setText("carrier released\n" + displayStats().parked()
+                + " stack" + (displayStats().parked() == 1 ? "" : "s") + " in heap · " + waiting + " queued");
         comparisonPinValue.setText("carrier retained\n" + pinned
                 + " lane" + (pinned == 1 ? "" : "s") + " blocked · " + waiting + " queued");
     }
 
     private void syncResourcePool() {
-        boolean visible = sim.scenario() == Sim.Scenario.RESOURCE_POOL;
-        Sim.ResourcePoolStats pool = sim.resourcePoolStats();
+        boolean visible = displayScenario() == Sim.Scenario.RESOURCE_POOL;
+        Sim.ResourcePoolStats pool = displayResourcePoolStats();
         for (int i = 0; i < databasePermitSlots.size(); i++) {
             Box slot = databasePermitSlots.get(i);
             slot.setVisible(visible && i < pool.capacity());
             slot.setMaterial(i < pool.inUse() ? resourceActiveMaterial : resourceIdleMaterial);
-            slot.setScaleY(i < pool.inUse() ? 1.0 + 0.12 * Math.sin(sim.time() * 7 + i) : 1.0);
+            slot.setScaleY(i < pool.inUse() ? 1.0 + 0.12 * Math.sin(displayTime() * 7 + i) : 1.0);
         }
         databasePoolLabel.setVisible(visible);
         databasePoolLabel.setText("DB CONNECTION POOL · " + pool.inUse() + "/" + pool.capacity()
@@ -1024,7 +1029,7 @@ public final class MachineScene extends StackPane {
     }
 
     private void drawLessonOverlay() {
-        Sim.Scenario scenario = sim.scenario();
+        Sim.Scenario scenario = displayScenario();
         lessonCanvas.setVisible(scenario != Sim.Scenario.NONE);
         if (scenario == Sim.Scenario.NONE) return;
         GraphicsContext graphics = lessonCanvas.getGraphicsContext2D();
@@ -1046,7 +1051,7 @@ public final class MachineScene extends StackPane {
     }
 
     private void drawPlatformComparison(GraphicsContext graphics) {
-        int tasks = sim.scenarioSubmitted();
+        int tasks = displayScenarioSubmitted();
         lessonText(graphics, "SAME BLOCKING I/O WORKLOAD · " + tasks + " TASKS", 18, 22, WHITE, 11, true);
         graphics.setStroke(Color.web("#26364a"));
         graphics.strokeLine(340, 34, 340, 151);
@@ -1058,15 +1063,15 @@ public final class MachineScene extends StackPane {
 
         lessonText(graphics, "VIRTUAL THREAD PER TASK", 360, 46, PURPLE, 10, true);
         drawDotGrid(graphics, Math.min(tasks, 30), 360, 61, 10, 17, PURPLE, false);
-        lessonText(graphics, tasks + " VTs · " + sim.carriers().size() + " CARRIER THREADS", 360, 130, WHITE, 11, true);
-        lessonText(graphics, sim.stats().parked() + " PARKED · CARRIERS REUSED", 360, 148, GREEN, 9, false);
+        lessonText(graphics, tasks + " VTs · " + displayCarrierCount() + " CARRIER THREADS", 360, 130, WHITE, 11, true);
+        lessonText(graphics, displayStats().parked() + " PARKED · CARRIERS REUSED", 360, 148, GREEN, 9, false);
         lessonCanvas.setAccessibleText("Platform versus virtual threads. The same " + tasks
-                + " blocking tasks use " + tasks + " platform OS threads, or " + sim.carriers().size()
-                + " virtual-thread carriers with " + sim.stats().parked() + " tasks currently parked.");
+                + " blocking tasks use " + tasks + " platform OS threads, or " + displayCarrierCount()
+                + " virtual-thread carriers with " + displayStats().parked() + " tasks currently parked.");
     }
 
     private void drawResourceLimit(GraphicsContext graphics) {
-        Sim.ResourcePoolStats pool = sim.resourcePoolStats();
+        Sim.ResourcePoolStats pool = displayResourcePoolStats();
         lessonText(graphics, "DOWNSTREAM BOTTLENECK · DATABASE CONNECTIONS", 18, 22, PURPLE, 11, true);
         lessonText(graphics, "PARKED WAITERS", 18, 49, Color.web("#b6c6d8"), 9, true);
         drawDotGrid(graphics, Math.min(pool.waiting(), 20), 18, 64, 10, 16, PURPLE, false);
@@ -1105,8 +1110,8 @@ public final class MachineScene extends StackPane {
     }
 
     private void drawCpuPlateau(GraphicsContext graphics) {
-        int carriers = sim.carriers().size();
-        int load = sim.stats().mounted() + sim.stats().runnable();
+        int carriers = displayCarrierCount();
+        int load = displayStats().mounted() + displayStats().runnable();
         lessonText(graphics, "CPU-BOUND WORK · PARALLELISM HAS A HARD CEILING", 18, 22, BLUE, 11, true);
         graphics.setStroke(Color.web("#53657a"));
         graphics.setLineWidth(1);
@@ -1135,21 +1140,21 @@ public final class MachineScene extends StackPane {
             int row = i / 5;
             double x = 398 + column * 48;
             double y = 65 + row * 38;
-            graphics.setFill(i < sim.stats().mounted() ? AMBER : Color.web("#26364a"));
+            graphics.setFill(i < displayStats().mounted() ? AMBER : Color.web("#26364a"));
             graphics.fillRoundRect(x, y, 36, 25, 6, 6);
             lessonText(graphics, "C" + (i + 1), x + 10, y + 17,
-                    i < sim.stats().mounted() ? Color.web("#1c1508") : Color.web("#8ea2b8"), 9, true);
+                    i < displayStats().mounted() ? Color.web("#1c1508") : Color.web("#8ea2b8"), 9, true);
         }
-        lessonText(graphics, sim.stats().runnable() + " QUEUED · "
-                + Math.round(sim.carrierUtilization() * 100) + "% UTILIZED", 395, 146, GREEN, 10, true);
-        lessonCanvas.setAccessibleText("CPU-bound workload. " + sim.stats().mounted() + " of " + carriers
-                + " carriers are busy and " + sim.stats().runnable()
+        lessonText(graphics, displayStats().runnable() + " QUEUED · "
+                + Math.round(displayCarrierUtilization() * 100) + "% UTILIZED", 395, 146, GREEN, 10, true);
+        lessonCanvas.setAccessibleText("CPU-bound workload. " + displayStats().mounted() + " of " + carriers
+                + " carriers are busy and " + displayStats().runnable()
                 + " tasks are queued. Throughput plateaus at the carrier and core count.");
     }
 
     private void drawStructuredScopes(GraphicsContext graphics) {
         lessonText(graphics, "STRUCTURED CONCURRENCY · FORK → CONTAIN → JOIN", 18, 22, GREEN, 11, true);
-        List<Sim.ScopeStats> scopes = sim.structuredScopes();
+        List<Sim.ScopeStats> scopes = displayStructuredScopes();
         for (int scopeIndex = 0; scopeIndex < scopes.size(); scopeIndex++) {
             Sim.ScopeStats scope = scopes.get(scopeIndex);
             double left = 18 + scopeIndex * 220;
@@ -1228,8 +1233,8 @@ public final class MachineScene extends StackPane {
     /** Supplies measured renderer performance and drives AUTO quality hysteresis. */
     public void setPerformance(double fps, double frameMillis) {
         if (requestedQuality == Quality.AUTO) {
-            if (!autoLow && (fps < 48 || frameMillis > 22 || sim.vts().size() > 320)) autoLow = true;
-            else if (autoLow && fps > 56 && frameMillis < 18 && sim.vts().size() < 260) autoLow = false;
+            if (!autoLow && (fps < 48 || frameMillis > 22 || displayVts().size() > 320)) autoLow = true;
+            else if (autoLow && fps > 56 && frameMillis < 18 && displayVts().size() < 260) autoLow = false;
         }
         diagnostics.setText("%.0f FPS · %.1f ms · %s".formatted(fps, frameMillis, qualityLabel()));
     }
@@ -1252,7 +1257,7 @@ public final class MachineScene extends StackPane {
     }
 
     public void highlightVt(long id) {
-        for (Vt vt : sim.vts()) {
+        for (ThreadView vt : displayVts()) {
             if (vt.id() == id) {
                 follow(vt);
                 break;
@@ -1262,16 +1267,33 @@ public final class MachineScene extends StackPane {
     }
 
     public boolean clearFollow() {
-        if (followedVt == null) return false;
+        if (followedId < 0) return false;
         followedVt = null;
+        followedId = -1;
         followOverlay.setVisible(false);
         return true;
     }
 
-    private void follow(Vt vt) {
+    private void follow(ThreadView vt) {
         followedVt = vt;
+        followedId = vt.id();
         followOverlay.setVisible(true);
         tooltip.setVisible(false);
+    }
+
+    public void setReplayFrame(ReplayFrame frame) {
+        replayFrame = frame;
+        rebindFollow();
+    }
+
+    public void clearReplayFrame() {
+        replayFrame = null;
+        rebindFollow();
+    }
+
+    private void rebindFollow() {
+        if (followedId < 0) return;
+        followedVt = displayVts().stream().filter(vt -> vt.id() == followedId).findFirst().orElse(null);
     }
 
     public void setPresenterMode(boolean presenter) {
@@ -1292,6 +1314,48 @@ public final class MachineScene extends StackPane {
 
     public boolean highContrast() { return highContrast; }
 
+    private double displayTime() { return replayFrame == null ? sim.time() : replayFrame.time(); }
+    private double displayBootT() { return replayFrame == null ? sim.bootT() : replayFrame.bootT(); }
+    private int displayChapter() { return replayFrame == null ? sim.chapter() : replayFrame.chapter(); }
+    private boolean displayFreeRun() { return replayFrame == null ? sim.freeRun() : replayFrame.freeRun(); }
+    private Sim.Stats displayStats() { return replayFrame == null ? sim.stats() : replayFrame.stats(); }
+    private Sim.Scenario displayScenario() {
+        return replayFrame == null ? sim.scenario() : replayFrame.scenario();
+    }
+    private int displayScenarioSubmitted() {
+        return replayFrame == null ? sim.scenarioSubmitted() : replayFrame.scenarioSubmitted();
+    }
+    private double displayCarrierUtilization() {
+        return replayFrame == null ? sim.carrierUtilization() : replayFrame.carrierUtilization();
+    }
+    private Sim.ResourcePoolStats displayResourcePoolStats() {
+        return replayFrame == null ? sim.resourcePoolStats() : replayFrame.resourcePoolStats();
+    }
+    private List<Sim.ScopeStats> displayStructuredScopes() {
+        return replayFrame == null ? sim.structuredScopes() : replayFrame.structuredScopes();
+    }
+    private List<? extends ThreadView> displayVts() {
+        return replayFrame == null ? sim.vts() : replayFrame.vts();
+    }
+    private ThreadView displayHero() {
+        return displayVts().stream().filter(ThreadView::hero).findFirst().orElse(null);
+    }
+    private int displayCarrierCount() {
+        return replayFrame == null ? sim.carriers().size() : replayFrame.carriers().size();
+    }
+    private boolean displayCarrierPinned(int index) {
+        return replayFrame == null ? sim.carriers().get(index).pinned()
+                : replayFrame.carriers().get(index).pinned();
+    }
+    private double displayCarrierHeat(int index) {
+        return replayFrame == null ? sim.carriers().get(index).heat()
+                : replayFrame.carriers().get(index).heat();
+    }
+    private boolean displayCarrierMounted(int index) {
+        return replayFrame == null ? sim.carriers().get(index).mounted() != null
+                : replayFrame.carriers().get(index).mountedVtId() >= 0;
+    }
+
     public void cameraPreset(CameraRig.Preset preset) {
         camera.toPreset(preset);
     }
@@ -1304,10 +1368,10 @@ public final class MachineScene extends StackPane {
         });
     }
 
-    private static void setPosition(Node node, Vec3 pos) {
-        node.setTranslateX(pos.x);
-        node.setTranslateY(pos.y);
-        node.setTranslateZ(pos.z);
+    private static void setPosition(Node node, ThreadView thread) {
+        node.setTranslateX(thread.x());
+        node.setTranslateY(thread.y());
+        node.setTranslateZ(thread.z());
     }
 
     private static void setCylinderBetween(Cylinder cylinder,

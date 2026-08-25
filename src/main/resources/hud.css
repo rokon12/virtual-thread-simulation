@@ -308,6 +308,55 @@
     -fx-effect: dropshadow(gaussian, rgba(52,211,153,0.45), 7, 0.2, 0, 0);
 }
 
+.timeline-control {
+    -fx-padding: 0 8 0 8;
+}
+
+.timeline-status, .timeline-legend {
+    -fx-font-family: "IBM Plex Mono";
+    -fx-font-size: 8.5px;
+    -fx-text-fill: #8ea2b8;
+}
+
+.timeline-status {
+    -fx-text-fill: #c4d3e3;
+}
+
+.timeline-live-button {
+    -fx-min-height: 20;
+    -fx-pref-height: 20;
+    -fx-padding: 0 7 0 7;
+    -fx-font-family: "IBM Plex Mono";
+    -fx-font-size: 8.5px;
+    -fx-background-color: #0f2b21;
+    -fx-border-color: #2a5c48;
+    -fx-border-radius: 5;
+    -fx-background-radius: 5;
+    -fx-text-fill: #6ee7b7;
+    -fx-cursor: hand;
+}
+
+.timeline-live-button:disabled {
+    -fx-opacity: 0.35;
+}
+
+.timeline-slider {
+    -fx-pref-height: 14;
+    -fx-padding: 0;
+}
+
+.timeline-slider .track {
+    -fx-pref-height: 3;
+    -fx-background-color: #26364a;
+}
+
+.timeline-slider .thumb {
+    -fx-pref-width: 10;
+    -fx-pref-height: 10;
+    -fx-background-color: #e6edf3;
+    -fx-effect: dropshadow(gaussian, rgba(96,165,250,0.5), 6, 0.2, 0, 0);
+}
+
 .world-label {
     -fx-font-family: "IBM Plex Mono";
     -fx-font-size: 12px;

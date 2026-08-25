@@ -5,7 +5,7 @@ park, resume, and pin across a small carrier pool. The implementation follows
 [`design/JavaFX-Spec.md`](design/JavaFX-Spec.md) and uses the accompanying HTML
 simulation as its behavioral reference.
 
-![The Virtual Thread Machine demonstrating parking, pinning, downstream limits, CPU saturation, and structured scopes](docs/media/virtual-thread-machine-demo.gif)
+![The Virtual Thread Machine demonstrating parking, downstream limits, structured scopes, and historical timeline replay](docs/media/virtual-thread-machine-demo.gif)
 
 ## Run
 
@@ -27,7 +27,7 @@ expose ordinary virtual-thread carrier identity.
 
 ## Controls
 
-- `Space`: pause or resume
+- `Space`: pause/resume the live simulation or play/pause recorded history
 - `←` / `→`: previous or next chapter
 - `1`–`4`: overview, carriers, heap, and top camera presets
 - `0`: emergency overview camera
@@ -37,9 +37,14 @@ expose ordinary virtual-thread carrier identity.
 - `Q`: cycle automatic, high, and low render quality
 - `H`: toggle high-contrast mode
 - `N`: toggle the second-screen speaker-notes window
+- `J` / `K`: step backward or forward through recorded history
+- `L`: leave replay and return to the untouched live simulation
 - `F11`: toggle full screen
 - Mouse drag: orbit
 - Mouse wheel/trackpad scroll or two-finger pinch: zoom in and out
+- Drag the bottom timeline or focus it and use `←` / `→`: inspect an earlier
+  immutable frame; colored marks identify chapters, mounts, parks, pins,
+  completions, failures, and cancellations
 - Click a VT or one of its event-log entries: follow its lifecycle and time in
   each state
 - `Esc` or the lifecycle card's × button: stop following a VT
@@ -51,6 +56,12 @@ highlighting, and a rolling completions/second chart. `AUTO` render quality
 hides nonessential glows when frame rate drops or the task pool becomes dense.
 The layout compacts below 1280 px and all controls expose keyboard focus and
 accessible descriptions.
+
+The rolling timeline retains the latest 360 display snapshots. Entering history
+automatically pauses the live model, updates the 3D particles, counters, event
+log, narration, lifecycle card, and speaker notes to the selected instant, and
+never restores historical data into the model. `LIVE`/`L` returns to the exact
+live state and running/auto-play mode that existed before scrubbing.
 
 Tasks deliberately have different profiles and seeded random durations: short
 CPU work, longer compute work, and I/O-bound work with randomized 1–8 second
@@ -100,7 +111,8 @@ after 4.5 seconds. Override the delay with `--snapshot-at=<seconds>`.
 Use `--snapshot-chapter=1..10` to capture a specific chapter. The helper script
 `scripts/capture-chapters.sh` captures all ten with seed 42. Add
 `--snapshot-follow` to include the selected hero VT's lifecycle card in a
-visual smoke test.
+visual smoke test. Add `--snapshot-replay` to capture the historical replay UI
+roughly two seconds behind the live edge.
 
 ## Test
 
@@ -112,9 +124,9 @@ The model is JavaFX-free and uses a seeded `RandomGenerator`. The application
 feeds it fixed 60 Hz simulation steps so a seed produces repeatable behavior
 independently of render-frame timing.
 
-The suite also exercises randomized state invariants, deterministic event
-vocabulary, the real virtual-thread bridge, settings parsing, and a scale
-performance budget.
+The suite also exercises randomized state invariants, immutable bounded replay
+history and markers, deterministic event vocabulary, the real virtual-thread
+bridge, settings parsing, and a scale performance budget.
 
 ## Native package
 

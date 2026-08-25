@@ -28,6 +28,8 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import vtmachine.model.Sim;
+import vtmachine.model.ReplayFrame;
+import vtmachine.model.ReplayTimeline;
 
 /** All two-dimensional status, narration, metrics, and controls for the machine. */
 public final class Hud {
@@ -53,11 +55,13 @@ public final class Hud {
         "Related child VTs live inside parent scopes. Each scope forks four children and joins only after they finish; when one CHECKOUT child fails, its active siblings are cancelled and the failure is contained within that scope."
     };
 
-    public record Actions(IntConsumer chapter, Consumer<Boolean> freeRun,
+    public record Actions(Runnable playPause, IntConsumer chapter, Consumer<Boolean> freeRun,
             Consumer<Boolean> liveMode, Runnable burst, Runnable park, Runnable pin,
-            Runnable settings, LongConsumer highlight, Runnable refocus) {}
+            Runnable settings, LongConsumer highlight, IntConsumer replayFrame,
+            Runnable returnLive, Runnable refocus) {}
 
     private final Sim sim;
+    private final ReplayTimeline timeline;
     private final Actions actions;
     private final HBox header;
     private final VBox sidebar;
@@ -80,14 +84,27 @@ public final class Hud {
     private final Label chapterBody = new Label();
     private final Label speedReadout = new Label("0.75×");
     private final Label performance = new Label("-- FPS · AUTO");
+    private final Label timelineStatus = new Label("LIVE · recording");
+    private final Label timelineLegend = new Label("SPAWN · MOUNT · PARK · PIN · DONE");
+    private final Slider timelineSlider = new Slider(0, 0, 0);
+    private final Canvas timelineMarkers = new Canvas(300, 9);
+    private final Button returnLive = new Button("LIVE");
+    private final Slider speedSlider = new Slider(0.25, 3.0, 0.75);
     private final Canvas throughput = new Canvas(254, 54);
     private final double[] throughputSamples = new double[72];
     private int throughputCursor;
     private double lastSampleTime = Double.NaN;
     private int lastCompleted;
+    private ReplayFrame replayFrame;
+    private boolean replayPlaying;
+    private boolean syncingTimeline;
+    private int lastTimelineSize = -1;
+    private int lastTimelineIndex = -1;
+    private VBox timelineControl;
 
-    public Hud(Sim sim, Actions actions) {
+    public Hud(Sim sim, ReplayTimeline timeline, Actions actions) {
         this.sim = sim;
+        this.timeline = timeline;
         this.actions = actions;
         header = buildHeader();
         sidebar = buildSidebar();
@@ -245,7 +262,7 @@ public final class Hud {
         playButton.setMinWidth(90);
         playButton.setAccessibleText("Pause or resume the simulation");
         playButton.setOnAction(event -> {
-            sim.setRunning(!sim.running());
+            actions.playPause.run();
             sync();
             actions.refocus.run();
         });
@@ -257,27 +274,64 @@ public final class Hud {
                 "Demonstrate one native or foreign-function pin");
         Button settings = controlButton("Settings", "settings-button", actions.settings,
                 "Change carrier count, task limit, task rate, and random seed");
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
+        VBox timelineControl = buildTimelineControl();
+        HBox.setHgrow(timelineControl, Priority.ALWAYS);
         performance.getStyleClass().add("performance-label");
         Label speedLabel = new Label("SPEED");
         speedLabel.getStyleClass().add("speed-label");
-        Slider speed = new Slider(0.25, 3.0, sim.speed());
-        speed.setBlockIncrement(0.25);
-        speed.setMajorTickUnit(0.25);
-        speed.setSnapToTicks(true);
-        speed.setPrefWidth(120);
-        speed.setAccessibleText("Simulation speed");
-        speed.valueProperty().addListener((observable, oldValue, newValue) -> {
+        speedSlider.setValue(sim.speed());
+        speedSlider.setBlockIncrement(0.25);
+        speedSlider.setMajorTickUnit(0.25);
+        speedSlider.setSnapToTicks(true);
+        speedSlider.setPrefWidth(120);
+        speedSlider.setAccessibleText("Simulation speed");
+        speedSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
             double snapped = Math.round(newValue.doubleValue() * 4) / 4.0;
             sim.setSpeed(snapped);
             speedReadout.setText("%.2f×".formatted(sim.speed()));
         });
         speedReadout.getStyleClass().add("speed-readout");
         speedReadout.setMinWidth(44);
-        bar.getChildren().addAll(playButton, burst, park, pin, settings, spacer,
-                performance, speedLabel, speed, speedReadout);
+        bar.getChildren().addAll(playButton, burst, park, pin, settings, timelineControl,
+                performance, speedLabel, speedSlider, speedReadout);
         return bar;
+    }
+
+    private VBox buildTimelineControl() {
+        timelineStatus.getStyleClass().add("timeline-status");
+        timelineStatus.setTextOverrun(javafx.scene.control.OverrunStyle.ELLIPSIS);
+        timelineStatus.setMaxWidth(230);
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        timelineLegend.getStyleClass().add("timeline-legend");
+        returnLive.getStyleClass().add("timeline-live-button");
+        returnLive.setAccessibleText("Return from replay history to the live simulation");
+        returnLive.setDisable(true);
+        returnLive.setOnAction(event -> {
+            actions.returnLive.run();
+            actions.refocus.run();
+        });
+        HBox header = new HBox(6, timelineStatus, spacer, timelineLegend, returnLive);
+        header.setAlignment(Pos.CENTER_LEFT);
+
+        timelineSlider.getStyleClass().add("timeline-slider");
+        timelineSlider.setMinWidth(120);
+        timelineSlider.setMaxWidth(Double.MAX_VALUE);
+        timelineSlider.setBlockIncrement(1);
+        timelineSlider.setAccessibleText("Recorded simulation history");
+        timelineSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
+            if (syncingTimeline || timeline.size() == 0) return;
+            actions.replayFrame.accept((int) Math.round(newValue.doubleValue()));
+        });
+        timelineMarkers.setMouseTransparent(true);
+        timelineMarkers.widthProperty().bind(timelineSlider.widthProperty());
+        timelineControl = new VBox(-2, header, timelineSlider, timelineMarkers);
+        timelineControl.getStyleClass().add("timeline-control");
+        timelineControl.setMinWidth(150);
+        timelineControl.setPrefWidth(340);
+        timelineControl.setMaxWidth(Double.MAX_VALUE);
+        timelineControl.widthProperty().addListener((observable, oldValue, newValue) -> drawTimelineMarkers());
+        return timelineControl;
     }
 
     private Button controlButton(String text, String styleClass, Runnable action, String help) {
@@ -307,14 +361,14 @@ public final class Hud {
         previous.getStyleClass().add("previous-button");
         previous.setAccessibleText("Previous chapter");
         previous.setOnAction(event -> {
-            actions.chapter.accept(sim.chapter() - 1);
+            actions.chapter.accept((replayFrame == null ? sim.chapter() : replayFrame.chapter()) - 1);
             actions.refocus.run();
         });
         Button next = new Button("Next →");
         next.getStyleClass().add("next-button");
         next.setAccessibleText("Next chapter");
         next.setOnAction(event -> {
-            actions.chapter.accept(sim.chapter() + 1);
+            actions.chapter.accept((replayFrame == null ? sim.chapter() : replayFrame.chapter()) + 1);
             actions.refocus.run();
         });
         HBox row = new HBox(9, chapterNumber, chapterTitle, spacer, previous, next);
@@ -335,6 +389,7 @@ public final class Hud {
     public void syncFrame(double wallTimeSeconds, double fps, String quality) {
         led.setOpacity(0.35 + 0.65 * (0.5 + 0.5 * Math.cos(wallTimeSeconds * Math.PI * 2 / 1.6)));
         performance.setText("%.0f FPS · %s".formatted(fps, quality));
+        if (replayFrame != null) return;
         if (Double.isNaN(lastSampleTime)) {
             lastSampleTime = wallTimeSeconds;
             lastCompleted = sim.stats().completed();
@@ -377,37 +432,49 @@ public final class Hud {
     }
 
     public void sync() {
-        Sim.Stats stats = sim.stats();
+        Sim.Stats stats = replayFrame == null ? sim.stats() : replayFrame.stats();
+        int liveCount = replayFrame == null ? sim.vts().size() : replayFrame.vts().size();
+        double utilization = replayFrame == null ? sim.carrierUtilization() : replayFrame.carrierUtilization();
         counters[0].setText(Integer.toString(stats.runnable()));
         counters[1].setText(Integer.toString(stats.mounted()));
         counters[2].setText(Integer.toString(stats.parked()));
         counters[3].setText(Integer.toString(stats.completed()));
-        counters[4].setText(Integer.toString(sim.vts().size()));
-        counters[5].setText("%.0f%%".formatted(sim.carrierUtilization() * 100));
+        counters[4].setText(Integer.toString(liveCount));
+        counters[5].setText("%.0f%%".formatted(utilization * 100));
         for (Sim.Flash flash : Sim.Flash.values()) {
-            flashes.get(flash).setOpacity(Math.max(0, 1 - sim.flashAge(flash) / 1.6));
+            double age = replayFrame == null ? sim.flashAge(flash)
+                    : replayFrame.flashAges().getOrDefault(flash, 9.0);
+            flashes.get(flash).setOpacity(Math.max(0, 1 - age / 1.6));
         }
         int line = 0;
-        for (String entry : sim.log()) {
+        Iterable<String> entries = replayFrame == null ? sim.log() : replayFrame.log();
+        for (String entry : entries) {
             if (line >= logLines.size()) break;
             Label label = logLines.get(line++);
             label.setText(entry);
             label.setAccessibleText("Event: " + entry);
         }
         while (line < logLines.size()) logLines.get(line++).setText("");
-        status.setText(!sim.running() ? "PAUSED" : sim.bootT() < 3 ? "BOOTING" : "RUNNING");
-        playButton.setText(sim.running() ? "Pause" : "Run");
-        guided.setSelected(!sim.freeRun());
-        freeRun.setSelected(sim.freeRun());
-        synthetic.setSelected(!sim.liveMode());
-        live.setSelected(sim.liveMode());
-        Sim.ProfileStats mix = sim.profileStats();
-        feedNotice.setText((sim.liveMode()
+        boolean displayedFreeRun = replayFrame == null ? sim.freeRun() : replayFrame.freeRun();
+        boolean displayedLive = replayFrame == null ? sim.liveMode() : replayFrame.liveMode();
+        status.setText(replayFrame != null ? "REPLAY"
+                : !sim.running() ? "PAUSED" : sim.bootT() < 3 ? "BOOTING" : "RUNNING");
+        playButton.setText(replayFrame != null ? replayPlaying ? "Pause replay" : "Play replay"
+                : sim.running() ? "Pause" : "Run");
+        playButton.setAccessibleText(replayFrame != null
+                ? "Play or pause recorded simulation history" : "Pause or resume the simulation");
+        guided.setSelected(!displayedFreeRun);
+        freeRun.setSelected(displayedFreeRun);
+        synthetic.setSelected(!displayedLive);
+        live.setSelected(displayedLive);
+        Sim.ProfileStats mix = replayFrame == null ? sim.profileStats() : replayFrame.profileStats();
+        double averageIo = replayFrame == null ? sim.averageIoSeconds() : replayFrame.averageIoSeconds();
+        feedNotice.setText((displayedLive
                 ? "● LIVE · illustrative lanes · I/O avg %.1fs"
-                : "◇ MODEL · I/O avg %.1fs").formatted(sim.averageIoSeconds())
+                : "◇ MODEL · I/O avg %.1fs").formatted(averageIo)
                 + "\nMIX · FAST " + mix.fast() + " · CPU " + mix.compute()
                 + " · I/O " + mix.ioBound());
-        int chapter = sim.chapter();
+        int chapter = replayFrame == null ? sim.chapter() : replayFrame.chapter();
         chapterNumber.setText("CHAPTER " + (chapter + 1) + "/" + Sim.CHAPTER_COUNT);
         chapterTitle.setText(chapterTitle(chapter));
         chapterTitle.getStyleClass().removeIf(style -> style.startsWith("text-"));
@@ -417,6 +484,86 @@ public final class Hud {
         speedReadout.setText("%.2f×".formatted(sim.speed()));
     }
 
+    public void setReplayFrame(ReplayFrame frame, boolean playing) {
+        replayFrame = frame;
+        replayPlaying = playing;
+        sync();
+    }
+
+    public void clearReplayFrame() {
+        replayFrame = null;
+        replayPlaying = false;
+        sync();
+    }
+
+    public void syncTimeline(int selectedIndex, boolean playing) {
+        replayPlaying = playing;
+        int size = timeline.size();
+        int latest = Math.max(0, size - 1);
+        int selected = replayFrame == null ? latest : Math.max(0, Math.min(selectedIndex, latest));
+        syncingTimeline = true;
+        timelineSlider.setMax(latest);
+        timelineSlider.setMajorTickUnit(Math.max(1, latest / 8.0));
+        timelineSlider.setValue(selected);
+        timelineSlider.setDisable(size < 2);
+        syncingTimeline = false;
+        returnLive.setDisable(replayFrame == null);
+
+        ReplayFrame selectedFrame = size == 0 ? null : timeline.frame(selected);
+        if (selectedFrame == null) {
+            timelineStatus.setText("LIVE · recording");
+        } else if (replayFrame == null) {
+            timelineStatus.setText("LIVE · " + formatTime(selectedFrame.time()) + " · recording");
+        } else {
+            double behind = Math.max(0, timeline.latest().time() - selectedFrame.time());
+            String marker = timeline.markersAt(selected).stream().findFirst()
+                    .map(ReplayTimeline.Marker::label).map(label -> " · " + label).orElse("");
+            timelineStatus.setText((playing ? "REPLAY ▶ · " : "REPLAY · ")
+                    + formatTime(selectedFrame.time()) + " · −" + String.format("%.1fs", behind) + marker);
+        }
+        timelineSlider.setAccessibleText(timelineStatus.getText());
+        if (lastTimelineSize != size || lastTimelineIndex != selected) {
+            lastTimelineSize = size;
+            lastTimelineIndex = selected;
+            drawTimelineMarkers();
+        }
+    }
+
+    private void drawTimelineMarkers() {
+        GraphicsContext graphics = timelineMarkers.getGraphicsContext2D();
+        double width = timelineMarkers.getWidth();
+        double height = timelineMarkers.getHeight();
+        graphics.clearRect(0, 0, width, height);
+        graphics.setStroke(Color.web("#26364a"));
+        graphics.setLineWidth(1);
+        graphics.strokeLine(5, 2, Math.max(5, width - 5), 2);
+        int denominator = Math.max(1, timeline.size() - 1);
+        for (ReplayTimeline.Marker marker : timeline.markers()) {
+            double x = 5 + marker.frameIndex() / (double) denominator * Math.max(0, width - 10);
+            graphics.setStroke(markerColor(marker.type()));
+            graphics.setLineWidth(marker.type() == ReplayTimeline.EventType.CHAPTER ? 2.2 : 1.3);
+            graphics.strokeLine(x, 0, x, height);
+        }
+    }
+
+    private static Color markerColor(ReplayTimeline.EventType type) {
+        return switch (type) {
+            case CHAPTER -> Color.web("#f5b84c");
+            case SPAWN, RESUME -> Color.web("#34d399");
+            case MOUNT -> Color.web("#60a5fa");
+            case PARK -> Color.web("#a78bfa");
+            case PIN, FAIL -> Color.web("#f87171");
+            case COMPLETE -> Color.web("#e6edf3");
+            case CANCEL -> Color.web("#d6a94e");
+        };
+    }
+
+    private static String formatTime(double seconds) {
+        int minutes = (int) seconds / 60;
+        double remainder = seconds - minutes * 60;
+        return "%02d:%04.1f".formatted(minutes, remainder);
+    }
+
     public void setCompact(boolean compact) {
         setSidebarWidth(sidebar, compact ? 238 : 290);
         narration.setPrefWidth(compact ? 340 : 400);
@@ -424,6 +571,14 @@ public final class Hud {
         chapterBody.setMaxWidth(compact ? 308 : 368);
         subtitle.setManaged(!compact);
         subtitle.setVisible(!compact);
+        performance.setManaged(!compact);
+        performance.setVisible(!compact);
+        timelineLegend.setManaged(!compact);
+        timelineLegend.setVisible(!compact);
+        timelineControl.setMinWidth(compact ? 110 : 150);
+        timelineControl.setPrefWidth(compact ? 220 : 340);
+        timelineStatus.setMaxWidth(compact ? 150 : 230);
+        speedSlider.setPrefWidth(compact ? 90 : 120);
         throughput.setWidth(compact ? 202 : 254);
         drawThroughput();
     }
