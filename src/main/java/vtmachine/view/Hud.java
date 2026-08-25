@@ -41,10 +41,10 @@ public final class Hud {
     private static final String[] CHAPTER_TEXT = {
         "Power on. A small set of OS threads lights up on the CPU cores; the JVM starts carrier (platform) threads, and the ForkJoinPool scheduler spins up above them. This small machine is all the OS ever sees.",
         "Application tasks arrive with varied runtimes: some finish quickly, some compute longer, and dotted-satellite tasks will perform I/O. The scheduler mounts each runnable VT onto a free carrier; only while mounted does a VT consume an OS thread.",
-        "An I/O-bound VT reaches its randomized wait. It turns purple and flies to the heap area while its stack chunks remain with the virtual thread. Its carrier is instantly free to run another VT.",
-        "The I/O completes. The stored continuation makes the VT runnable again and it remounts on ANY free carrier — not necessarily the one it left. Watch it land on a different slot.",
-        "A remaining failure mode on Java 25: blocking while a native or foreign-function frame prevents unmounting pins the VT to its carrier. The slot locks red until the pin ends. Ordinary synchronized code no longer pins.",
-        "The payoff. 500 mixed-duration tasks flood in and the machine does not grow: a fixed set of illustrative carrier lanes multiplexes fast, compute-heavy, and I/O-bound virtual threads, while parked waits retain lightweight heap-backed state."
+        "An I/O-bound VT reaches its randomized wait. Its stack-chunk marker lifts from the carrier into the heap while a pulse travels to the external network, disk, timer, or database endpoint. The carrier is instantly free for another VT.",
+        "The external I/O completes. The stored continuation moves back through the run queue and remounts on ANY free carrier — not necessarily the one it left. Watch the stack marker merge into a different slot.",
+        "Compare the two paths above the machine: parking moves stack chunks to the heap and releases the carrier; native or foreign-function pinning locks the carrier red and makes runnable work wait. Ordinary synchronized code no longer pins on Java 25.",
+        "The payoff. 500 mixed-duration tasks flood in while the green run-queue pressure bar expands. A fixed set of illustrative carriers drains the queue; I/O parking releases lanes, pinning blocks them, and completed VTs dissolve in place after releasing their carrier."
     };
 
     public record Actions(IntConsumer chapter, Consumer<Boolean> freeRun,
@@ -174,15 +174,15 @@ public final class Hud {
         feedNotice.setMinHeight(38);
         VBox behaviors = new VBox(6,
                 behaviorCard(Sim.Flash.MOUNT, "① Mount", "Runnable VT occupies one lane.", "blue"),
-                behaviorCard(Sim.Flash.PARK, "② I/O wait", "Purple VT parks on heap; satellite marks future I/O.", "purple"),
-                behaviorCard(Sim.Flash.RESUME, "③ Resume", "I/O done; any free lane can run it.", "green"),
-                behaviorCard(Sim.Flash.PIN, "④ Pinned", "Native/foreign blocking can retain a carrier.", "red"));
+                behaviorCard(Sim.Flash.PARK, "② I/O wait", "Stack chunks move to heap; external I/O pulse continues.", "purple"),
+                behaviorCard(Sim.Flash.RESUME, "③ Resume", "Continuation returns through queue to any free lane.", "green"),
+                behaviorCard(Sim.Flash.PIN, "④ Pinned", "Carrier stays red while queued work waits.", "red"));
 
         Label throughputHeader = new Label("THROUGHPUT · COMPLETIONS/S");
         throughputHeader.getStyleClass().add("section-header");
         throughput.getStyleClass().add("throughput-chart");
         throughput.setAccessibleText("Rolling graph of virtual-thread completions per second");
-        Label logHeader = new Label("EVENT LOG · CLICK A VT TO HIGHLIGHT");
+        Label logHeader = new Label("EVENT LOG · CLICK A VT TO FOLLOW");
         logHeader.getStyleClass().add("section-header");
         VBox logBox = new VBox(0);
         logBox.getStyleClass().add("event-log");

@@ -87,7 +87,8 @@ public final class LiveWorkload implements AutoCloseable {
                 expediteIo();
                 submit(Math.max(0, 2 - active.get()));
             }
-            case 4 -> submit(Math.max(0, 4 - active.get()));
+            case 4 -> submit(Math.max(0,
+                    Math.min(maxActive, sim.carriers().size() * 4) - active.get()));
             case 5 -> submit(maxActive - active.get());
             default -> { }
         }

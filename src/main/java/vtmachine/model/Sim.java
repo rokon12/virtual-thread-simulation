@@ -36,6 +36,22 @@ public final class Sim {
         public String display() { return display; }
     }
 
+    public enum IoDevice {
+        NETWORK("NETWORK"), DISK("DISK"), TIMER("TIMER"), DATABASE("DATABASE");
+
+        private final String display;
+        IoDevice(String display) { this.display = display; }
+        public String display() { return display; }
+    }
+
+    public enum LifecyclePhase {
+        RUNNABLE("RUNNABLE"), MOUNTED("MOUNTED"), PARKED("PARKED / I/O"), TERMINATED("TERMINATED");
+
+        private final String display;
+        LifecyclePhase(String display) { this.display = display; }
+        public String display() { return display; }
+    }
+
     public enum VtState {
         TO_QUEUE("toQueue"), QUEUED("queued"), MOUNTING("mounting"),
         RUNNING("running"), PARKING("parking"), PARKED("parked"),
@@ -169,12 +185,13 @@ public final class Sim {
             if (t >= 1) {
                 vt.pos.set(tween.to);
                 vt.tween = null;
-                vt.state = switch (tween.arrival) {
+                VtState arrived = switch (tween.arrival) {
                     case QUEUED -> VtState.QUEUED;
                     case RUNNING -> VtState.RUNNING;
                     case PARKED -> VtState.PARKED;
                     case DEAD -> VtState.DEAD;
                 };
+                vt.transitionTo(arrived, time);
                 if (tween.arrival == Arrival.RUNNING && vt.live) {
                     CompletableFuture<Void> signal = vt.resumed ? vt.resumeMountSignal : vt.firstMountSignal;
                     if (signal != null) signal.complete(null);
@@ -275,6 +292,9 @@ public final class Sim {
     private void reapPhase() {
         for (Iterator<Vt> iterator = vts.iterator(); iterator.hasNext();) {
             Vt vt = iterator.next();
+            if (vt.state == VtState.DONE && vt.lifecycleAge(time) >= 1.35) {
+                vt.transitionTo(VtState.DEAD, time);
+            }
             if (vt.state == VtState.DEAD) {
                 iterator.remove();
                 liveById.remove(vt.id);
@@ -293,10 +313,12 @@ public final class Sim {
         double plannedIo = profile == TaskProfile.IO_BOUND ? 1.0 + random.nextDouble() * 7.0 : 0;
         double ioTrigger = profile == TaskProfile.IO_BOUND
                 ? work * (0.38 + random.nextDouble() * 0.34) : -1;
+        IoDevice ioDevice = profile == TaskProfile.IO_BOUND
+                ? IoDevice.values()[random.nextInt(IoDevice.values().length)] : null;
         Vt vt = new Vt(nextId++, new Vec3(
                 -130 + random.nextDouble() * 20 - 10,
                 105 + random.nextDouble() * 12,
-                random.nextDouble() * 20 - 10), work, profile, plannedIo, ioTrigger);
+                random.nextDouble() * 20 - 10), work, profile, plannedIo, ioTrigger, ioDevice, time);
         if (hero == null) {
             hero = vt;
             vt.hero = true;
@@ -367,7 +389,10 @@ public final class Sim {
                 -130 + random.nextDouble() * 20 - 10,
                 105 + random.nextDouble() * 12,
                 random.nextDouble() * 20 - 10), 1.0, event.profile(),
-                event.plannedIoSeconds(), -1);
+                event.plannedIoSeconds(), -1,
+                event.profile() == TaskProfile.IO_BOUND
+                        ? IoDevice.values()[random.nextInt(IoDevice.values().length)] : null,
+                time);
         vt.live = true;
         vt.firstMountSignal = event.firstMount();
         vt.resumeMountSignal = event.resumeMount();
@@ -395,7 +420,7 @@ public final class Sim {
     private void mount(Vt vt, Carrier carrier) {
         carrier.mounted = vt;
         vt.carrier = carrier;
-        vt.state = VtState.MOUNTING;
+        vt.transitionTo(VtState.MOUNTING, time);
         tween(vt, new Vec3(laneX(carrier.index()), 30, 0), 0.55, Arrival.RUNNING);
         flash(Flash.MOUNT);
         addLog("VT-" + vt.id + (vt.resumed ? " resumed on C" : " mounted on C") + (carrier.index() + 1));
@@ -405,7 +430,8 @@ public final class Sim {
         Carrier carrier = vt.carrier;
         if (carrier != null) carrier.mounted = null;
         vt.carrier = null;
-        vt.state = VtState.PARKING;
+        vt.transitionTo(VtState.PARKING, time);
+        if (vt.ioDevice == null) vt.ioDevice = IoDevice.values()[random.nextInt(IoDevice.values().length)];
         vt.io = vt.live ? Double.POSITIVE_INFINITY
                 : vt.plannedIoSeconds > 0 ? vt.plannedIoSeconds : 1.0 + random.nextDouble() * 7.0;
         vt.parkedAt = time;
@@ -430,7 +456,7 @@ public final class Sim {
             ioSamples++;
             vt.parkedAt = 0;
         }
-        vt.state = VtState.TO_QUEUE;
+        vt.transitionTo(VtState.TO_QUEUE, time);
         vt.resumed = true;
         vt.io = 0;
         queue.addFirst(vt);
@@ -450,10 +476,10 @@ public final class Sim {
     private void complete(Vt vt, Carrier carrier) {
         carrier.mounted = null;
         vt.carrier = null;
-        vt.state = VtState.DONE;
-        tween(vt, new Vec3(155, 10, 90), 0.8, Arrival.DEAD);
+        vt.tween = null;
+        vt.transitionTo(VtState.DONE, time);
         completed++;
-        addLog("VT-" + vt.id + " completed · C" + (carrier.index() + 1) + " free · GC eligible");
+        addLog("VT-" + vt.id + " completed · C" + (carrier.index() + 1) + " free · terminated");
     }
 
     private void tween(Vt vt, Vec3 target, double duration, Arrival arrival) {
@@ -530,7 +556,10 @@ public final class Sim {
                 addLog("chapter: resume");
             }
             case 4 -> {
-                if (!liveMode && vts.stream().noneMatch(v -> v.state == VtState.RUNNING)) burst += 4;
+                if (!liveMode) {
+                    if (vts.stream().noneMatch(v -> v.state == VtState.RUNNING)) burst += 4;
+                    burst += carriers.size() * 3;
+                }
                 pendingPin = true;
                 addLog("chapter: pinned");
             }

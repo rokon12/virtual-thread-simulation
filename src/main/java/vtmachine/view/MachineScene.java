@@ -19,6 +19,8 @@ import javafx.scene.Node;
 import javafx.scene.PointLight;
 import javafx.scene.SceneAntialiasing;
 import javafx.scene.SubScene;
+import javafx.scene.canvas.Canvas;
+import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.input.MouseEvent;
@@ -62,12 +64,21 @@ public final class MachineScene extends StackPane {
     private final Group world = new Group();
     private final SubScene subScene;
     private final Pane labelOverlay = new Pane();
+    private final Canvas terminationCanvas = new Canvas();
     private final CameraRig camera = new CameraRig();
     private final Label tooltip = new Label();
     private final HBox cameraButtons;
     private final Label shortcut;
     private final Label diagnostics = new Label("-- FPS · AUTO/HIGH");
-    private final VBox gcBinOverlay = buildGcBinOverlay();
+    private final Label followTitle = new Label();
+    private final Label followStatus = new Label();
+    private final Label[] followDurations = new Label[Sim.LifecyclePhase.values().length];
+    private final VBox followOverlay = buildFollowOverlay();
+    private final Label comparisonParkValue = new Label();
+    private final Label comparisonPinValue = new Label();
+    private final VBox comparisonParkCard = comparisonCard("PARK", "VT → HEAP", comparisonParkValue, "purple");
+    private final VBox comparisonPinCard = comparisonCard("PIN", "VT ⊗ CARRIER", comparisonPinValue, "red");
+    private final HBox comparisonOverlay = buildComparisonOverlay();
 
     private final List<BootLayer> bootLayers = new ArrayList<>();
     private final List<ProjectedLabel> projectedLabels = new ArrayList<>();
@@ -77,11 +88,17 @@ public final class MachineScene extends StackPane {
     private final List<Sphere> particles = new ArrayList<>();
     private final List<Sphere> glows = new ArrayList<>();
     private final List<Sphere> ioMarkers = new ArrayList<>();
+    private final List<Box> stackChunks = new ArrayList<>();
+    private final List<Cylinder> ioLinks = new ArrayList<>();
+    private final List<Sphere> ioSignals = new ArrayList<>();
     private final List<Label> parkedBadges = new ArrayList<>();
+    private final List<Node> externalIoNodes = new ArrayList<>();
+    private final List<Label> externalIoLabels = new ArrayList<>();
     private final List<Sphere> trail = new ArrayList<>();
     private final Map<Node, Vt> pickedVts = new IdentityHashMap<>();
     private final EnumMap<VtColor, PhongMaterial> materials = new EnumMap<>(VtColor.class);
     private final EnumMap<VtColor, PhongMaterial> glowMaterials = new EnumMap<>(VtColor.class);
+    private final EnumMap<Sim.IoDevice, Vec3> ioEndpoints = new EnumMap<>(Sim.IoDevice.class);
     private final List<PhongMaterial> coreHeatMaterials = new ArrayList<>();
 
     private final PhongMaterial idleSlot = material(Color.web("#24425f"));
@@ -90,14 +107,22 @@ public final class MachineScene extends StackPane {
     private final PhongMaterial pinnedCore = material(Color.web("#8f2f31"));
     private final PhongMaterial schedulerBright = material(PURPLE);
     private final PhongMaterial schedulerDim = material(Color.web("#2a2145"));
+    private final PhongMaterial stackChunkMaterial = material(Color.web("#c4b5fd"));
+    private final PhongMaterial ioLinkMaterial = transparentMaterial(PURPLE, 0.38);
 
     private TorusMesh schedulerRing;
+    private Box queuePressureBar;
     private Shape3D heapGhost;
     private Label heapLabel;
+    private Label queuePressureLabel;
     private Label heroLabel;
     private long heroId = -1;
-    private long highlightedId = -1;
-    private long highlightUntil;
+    private Vt followedVt;
+    private Vt pressedVt;
+    private double pressX;
+    private double pressY;
+    private double displayedQueuePressure;
+    private boolean externalIoVisible;
     private boolean dragging;
     private Quality requestedQuality = Quality.AUTO;
     private boolean autoLow;
@@ -121,6 +146,9 @@ public final class MachineScene extends StackPane {
         subScene.heightProperty().bind(heightProperty());
 
         labelOverlay.setMouseTransparent(true);
+        terminationCanvas.setMouseTransparent(true);
+        terminationCanvas.widthProperty().bind(widthProperty());
+        terminationCanvas.heightProperty().bind(heightProperty());
         tooltip.getStyleClass().add("vt-tooltip");
         tooltip.setManaged(false);
         tooltip.setVisible(false);
@@ -148,34 +176,77 @@ public final class MachineScene extends StackPane {
         diagnostics.getStyleClass().add("diagnostics-label");
         diagnostics.setMouseTransparent(true);
 
-        getChildren().addAll(subScene, labelOverlay, cameraButtons, shortcut, diagnostics, gcBinOverlay);
+        getChildren().addAll(subScene, terminationCanvas, labelOverlay, cameraButtons, shortcut,
+                diagnostics, comparisonOverlay, followOverlay);
         StackPane.setAlignment(cameraButtons, Pos.TOP_RIGHT);
         StackPane.setMargin(cameraButtons, new Insets(14, 16, 0, 0));
         StackPane.setAlignment(shortcut, Pos.BOTTOM_RIGHT);
         StackPane.setMargin(shortcut, new Insets(0, 16, 16, 0));
         StackPane.setAlignment(diagnostics, Pos.TOP_LEFT);
         StackPane.setMargin(diagnostics, new Insets(16, 0, 0, 16));
-        StackPane.setAlignment(gcBinOverlay, Pos.BOTTOM_RIGHT);
-        StackPane.setMargin(gcBinOverlay, new Insets(0, 16, 48, 0));
+        StackPane.setAlignment(comparisonOverlay, Pos.TOP_CENTER);
+        StackPane.setMargin(comparisonOverlay, new Insets(14, 0, 0, 0));
+        StackPane.setAlignment(followOverlay, Pos.TOP_LEFT);
+        StackPane.setMargin(followOverlay, new Insets(54, 0, 0, 16));
 
         installPointerControls();
     }
 
-    private VBox buildGcBinOverlay() {
-        Region lid = new Region();
-        lid.getStyleClass().add("gc-bin-lid");
-        StackPane body = new StackPane(new Label("GC"));
-        body.getStyleClass().add("gc-bin-body");
-        VBox icon = new VBox(2, lid, body);
-        icon.setAlignment(Pos.CENTER);
-        Label text = new Label("GC ELIGIBLE");
-        text.getStyleClass().add("gc-bin-label");
-        VBox box = new VBox(3, icon, text);
-        box.getStyleClass().add("gc-bin-overlay");
-        box.setAlignment(Pos.CENTER);
-        box.setMouseTransparent(true);
+    private VBox buildFollowOverlay() {
+        followTitle.getStyleClass().add("follow-title");
+        followStatus.getStyleClass().add("follow-status");
+        followStatus.setWrapText(true);
+        followStatus.setMaxWidth(356);
+        Button close = new Button("×");
+        close.getStyleClass().add("follow-close");
+        close.setAccessibleText("Stop following this virtual thread");
+        close.setOnAction(event -> {
+            followedVt = null;
+            followOverlay.setVisible(false);
+            requestFocus();
+        });
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, javafx.scene.layout.Priority.ALWAYS);
+        HBox header = new HBox(8, followTitle, spacer, close);
+        header.setAlignment(Pos.CENTER_LEFT);
+
+        HBox phases = new HBox(5);
+        int index = 0;
+        for (Sim.LifecyclePhase phase : Sim.LifecyclePhase.values()) {
+            Label value = new Label(phase.display() + "\n0.0s");
+            value.getStyleClass().addAll("follow-phase", "follow-phase-" + phase.name().toLowerCase(Locale.ROOT));
+            followDurations[index++] = value;
+            phases.getChildren().add(value);
+        }
+        Label hint = new Label("Click another VT to follow its lifecycle");
+        hint.getStyleClass().add("follow-hint");
+        VBox box = new VBox(7, header, phases, followStatus, hint);
+        box.getStyleClass().add("follow-overlay");
+        box.setPrefWidth(380);
+        box.setMaxSize(380, Region.USE_PREF_SIZE);
+        box.setVisible(false);
+        return box;
+    }
+
+    private VBox comparisonCard(String titleText, String diagram, Label value, String color) {
+        Label title = new Label(titleText);
+        title.getStyleClass().addAll("comparison-title", "text-" + color);
+        Label visual = new Label(diagram);
+        visual.getStyleClass().add("comparison-visual");
+        value.getStyleClass().add("comparison-value");
+        VBox card = new VBox(2, title, visual, value);
+        card.getStyleClass().addAll("comparison-card", "comparison-" + color);
+        card.setAlignment(Pos.CENTER);
+        return card;
+    }
+
+    private HBox buildComparisonOverlay() {
+        HBox box = new HBox(8, comparisonParkCard, comparisonPinCard);
+        box.getStyleClass().add("comparison-overlay");
         box.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
-        box.setAccessibleText("Reclamation bin. Terminated virtual threads become eligible for garbage collection here.");
+        box.setMouseTransparent(true);
+        box.setVisible(false);
+        box.setAccessibleText("Parking releases a carrier; pinning retains a carrier and increases queue pressure.");
         return box;
     }
 
@@ -212,7 +283,6 @@ public final class MachineScene extends StackPane {
 
     private void buildStatics() {
         buildGrid();
-        buildGcBin();
         Group cpu = layer(150, 3.5, 64, 0, Color.web("#1c1508"), AMBER, 0);
         Group carriers = layer(150, 3.5, 56, 26, Color.web("#0a1626"), BLUE, 1);
         Group scheduler = layer(150, 3.5, 50, 52, Color.web("#150f2b"), PURPLE, 2);
@@ -241,62 +311,95 @@ public final class MachineScene extends StackPane {
         schedulerRing.setRotationAxis(Rotate.Y_AXIS);
         world.getChildren().add(schedulerRing);
 
+        queuePressureBar = new Box(130, 2.4, 5);
+        queuePressureBar.setTranslateX(-63);
+        queuePressureBar.setTranslateY(83);
+        queuePressureBar.setTranslateZ(29);
+        queuePressureBar.setMaterial(transparentMaterial(GREEN, 0.72));
+        queuePressureBar.setCullFace(CullFace.NONE);
+        queuePressureBar.setScaleX(0.03);
+        world.getChildren().add(queuePressureBar);
+
+        buildExternalIo();
+
         addProjectedLabel("OS THREADS / CPU CORES", "amber", -81, 7, 0, AnchorAlignment.RIGHT);
         addProjectedLabel("CARRIER THREADS", "blue", -81, 33, 0, AnchorAlignment.RIGHT);
         addProjectedLabel("SCHEDULER · ForkJoinPool", "purple", -81, 59, 0, AnchorAlignment.RIGHT);
         addProjectedLabel("VIRTUAL THREADS · runnable", "green", -91, 85, 0, AnchorAlignment.RIGHT);
         heapLabel = addProjectedLabel("I/O WAIT · 0 VTs · PARKED STACK CHUNKS", "purple",
                 118, 74, 0, AnchorAlignment.CENTER);
+        queuePressureLabel = addProjectedLabel("RUN QUEUE · EMPTY", "green",
+                0, 91, 28, AnchorAlignment.CENTER);
         addProjectedLabel("APPLICATION TASKS ↓", "muted", -130, 112, 0, AnchorAlignment.CENTER);
     }
 
-    private void buildGcBin() {
-        Group bin = new Group();
-        bin.setTranslateX(155);
-        bin.setTranslateZ(90);
-        PhongMaterial frame = material(Color.web("#c4d3e3"));
-        PhongMaterial wall = transparentMaterial(Color.web("#60a5fa"), 0.26);
-        Box base = new Box(30, 1.6, 24);
-        base.setTranslateY(0);
-        base.setMaterial(material(Color.web("#172334")));
-        Box back = new Box(30, 18, 1.2);
-        back.setTranslateY(9);
-        back.setTranslateZ(11.5);
-        back.setMaterial(wall);
-        Box leftWall = new Box(1.2, 18, 24);
-        leftWall.setTranslateX(-14.5);
-        leftWall.setTranslateY(9);
-        leftWall.setMaterial(wall);
-        Box rightWall = new Box(1.2, 18, 24);
-        rightWall.setTranslateX(14.5);
-        rightWall.setTranslateY(9);
-        rightWall.setMaterial(wall);
-        bin.getChildren().addAll(base, back, leftWall, rightWall);
-        for (int sx : new int[] {-1, 1}) {
-            for (int sz : new int[] {-1, 1}) {
-                Cylinder post = new Cylinder(0.75, 18, 7);
-                post.setTranslateX(sx * 14.5);
-                post.setTranslateY(9);
-                post.setTranslateZ(sz * 11.5);
-                post.setMaterial(frame);
-                bin.getChildren().add(post);
+    private void buildExternalIo() {
+        PhongMaterial device = material(Color.web("#7c6de8"));
+        PhongMaterial pulse = transparentMaterial(PURPLE, 0.32);
+        Sim.IoDevice[] devices = Sim.IoDevice.values();
+        for (int i = 0; i < devices.length; i++) {
+            Sim.IoDevice type = devices[i];
+            Vec3 position = new Vec3(160, 78, -52 + i * 35);
+            ioEndpoints.put(type, position);
+            Group icon = new Group();
+            icon.setTranslateX(position.x);
+            icon.setTranslateY(position.y);
+            icon.setTranslateZ(position.z);
+            switch (type) {
+                case NETWORK -> {
+                    Sphere center = new Sphere(3.4, 10);
+                    center.setMaterial(device);
+                    for (int branch = -1; branch <= 1; branch += 2) {
+                        Sphere node = new Sphere(1.5, 8);
+                        node.setTranslateX(branch * 6);
+                        node.setTranslateY(branch * 2.5);
+                        node.setMaterial(device);
+                        Box wire = new Box(8, 0.55, 0.55);
+                        wire.setTranslateX(branch * 3.2);
+                        wire.setTranslateY(branch * 1.2);
+                        wire.setRotate(branch * 20);
+                        wire.setMaterial(pulse);
+                        icon.getChildren().addAll(wire, node);
+                    }
+                    icon.getChildren().add(center);
+                }
+                case DISK -> {
+                    Cylinder platter = new Cylinder(5.5, 2.4, 18);
+                    platter.setMaterial(device);
+                    TorusMesh rim = new TorusMesh(4.2f, 0.45f, 32, 7);
+                    rim.setTranslateY(1.3);
+                    rim.setMaterial(pulse);
+                    icon.getChildren().addAll(platter, rim);
+                }
+                case TIMER -> {
+                    TorusMesh clock = new TorusMesh(4.8f, 0.65f, 36, 8);
+                    clock.setRotationAxis(Rotate.X_AXIS);
+                    clock.setRotate(90);
+                    clock.setMaterial(device);
+                    Box hand = new Box(0.65, 5, 0.65);
+                    hand.setTranslateY(2.1);
+                    hand.setRotate(-32);
+                    hand.setMaterial(pulse);
+                    icon.getChildren().addAll(clock, hand);
+                }
+                case DATABASE -> {
+                    for (int level = 0; level < 3; level++) {
+                        Cylinder disk = new Cylinder(5.2, 2.0, 18);
+                        disk.setTranslateY(level * 3.0 - 3.0);
+                        disk.setMaterial(level == 1 ? pulse : device);
+                        icon.getChildren().add(disk);
+                    }
+                }
             }
+            world.getChildren().add(icon);
+            externalIoNodes.add(icon);
+            Label label = addProjectedLabel(type.display(), "purple", position.x,
+                    position.y + 8, position.z, AnchorAlignment.CENTER);
+            label.setStyle("-fx-font-size: 9px;");
+            externalIoLabels.add(label);
         }
-        for (int sz : new int[] {-1, 1}) {
-            Box rim = new Box(30, 1.0, 1.0);
-            rim.setTranslateY(18);
-            rim.setTranslateZ(sz * 11.5);
-            rim.setMaterial(frame);
-            bin.getChildren().add(rim);
-        }
-        for (int sx : new int[] {-1, 1}) {
-            Box rim = new Box(1.0, 1.0, 24);
-            rim.setTranslateX(sx * 14.5);
-            rim.setTranslateY(18);
-            rim.setMaterial(frame);
-            bin.getChildren().add(rim);
-        }
-        world.getChildren().add(bin);
+        externalIoLabels.add(addProjectedLabel("EXTERNAL I/O", "purple",
+                160, 103, 0, AnchorAlignment.CENTER));
     }
 
     private void buildGrid() {
@@ -413,10 +516,27 @@ public final class MachineScene extends StackPane {
             ioMarker.setVisible(false);
             ioMarker.setMouseTransparent(true);
             ioMarker.setMaterial(materials.get(VtColor.PURPLE));
+            Box stackChunk = new Box(5.4, 1.15, 2.5);
+            stackChunk.setVisible(false);
+            stackChunk.setMouseTransparent(true);
+            stackChunk.setCullFace(CullFace.NONE);
+            stackChunk.setMaterial(stackChunkMaterial);
+            Cylinder ioLink = new Cylinder(0.18, 1, 5);
+            ioLink.setVisible(false);
+            ioLink.setMouseTransparent(true);
+            ioLink.setCullFace(CullFace.NONE);
+            ioLink.setMaterial(ioLinkMaterial);
+            Sphere ioSignal = new Sphere(0.72, 7);
+            ioSignal.setVisible(false);
+            ioSignal.setMouseTransparent(true);
+            ioSignal.setMaterial(materials.get(VtColor.PURPLE));
             particles.add(particle);
             glows.add(glow);
             ioMarkers.add(ioMarker);
-            world.getChildren().addAll(glow, particle, ioMarker);
+            stackChunks.add(stackChunk);
+            ioLinks.add(ioLink);
+            ioSignals.add(ioSignal);
+            world.getChildren().addAll(ioLink, stackChunk, glow, particle, ioMarker, ioSignal);
         }
     }
 
@@ -467,17 +587,28 @@ public final class MachineScene extends StackPane {
     private void installPointerControls() {
         subScene.setCursor(Cursor.OPEN_HAND);
         subScene.addEventHandler(MouseEvent.MOUSE_PRESSED, event -> {
-            dragging = true;
+            dragging = false;
+            pressX = event.getSceneX();
+            pressY = event.getSceneY();
+            pressedVt = pickedVts.get(event.getPickResult().getIntersectedNode());
             tooltip.setVisible(false);
-            camera.beginDrag(event.getSceneX(), event.getSceneY());
+            camera.beginDrag(pressX, pressY);
             subScene.setCursor(Cursor.CLOSED_HAND);
             subScene.requestFocus();
         });
-        subScene.addEventHandler(MouseEvent.MOUSE_DRAGGED, event ->
-                camera.drag(event.getSceneX(), event.getSceneY()));
-        subScene.addEventHandler(MouseEvent.MOUSE_RELEASED, event -> endDrag());
+        subScene.addEventHandler(MouseEvent.MOUSE_DRAGGED, event -> {
+            if (Math.hypot(event.getSceneX() - pressX, event.getSceneY() - pressY) > 4) dragging = true;
+            if (dragging) camera.drag(event.getSceneX(), event.getSceneY());
+        });
+        subScene.addEventHandler(MouseEvent.MOUSE_RELEASED, event -> {
+            Vt clicked = !dragging ? pressedVt : null;
+            endDrag();
+            pressedVt = null;
+            if (clicked != null) follow(clicked);
+        });
         subScene.addEventHandler(MouseEvent.MOUSE_EXITED, event -> {
             endDrag();
+            pressedVt = null;
             tooltip.setVisible(false);
         });
         subScene.setOnScroll(event -> {
@@ -515,7 +646,8 @@ public final class MachineScene extends StackPane {
                                 : " · I/O " + String.format(Locale.ROOT, "%.1f", vt.io()) + "s left"
                         : vt.profile() == Sim.TaskProfile.IO_BOUND
                                 ? " · I/O " + String.format(Locale.ROOT, "%.1f", vt.plannedIoSeconds()) + "s planned"
-                                : "");
+                                : "")
+                + (vt.ioDevice() == null ? "" : " · " + vt.ioDevice().display().toLowerCase(Locale.ROOT));
         tooltip.setText(text);
         tooltip.autosize();
         tooltip.relocate(Math.min(getWidth() - tooltip.getWidth() - 4, event.getX() + 14),
@@ -530,10 +662,14 @@ public final class MachineScene extends StackPane {
         double schedulerRise = clamp((sim.bootT() - 1.0) / 0.5, 0, 1);
         schedulerRing.setMaterial(schedulerRise > 0.6 ? schedulerBright : schedulerDim);
         syncCarriers();
+        syncQueuePressure(dt);
+        camera.sync();
         syncParticles();
         syncHero();
-        camera.sync();
         syncParkedBadges();
+        syncTerminationEffects();
+        syncFollowOverlay();
+        syncComparisonOverlay();
         projectLabels();
     }
 
@@ -560,6 +696,29 @@ public final class MachineScene extends StackPane {
         }
     }
 
+    private void syncQueuePressure(double dt) {
+        int waiting = sim.stats().runnable();
+        int lanes = Math.max(1, sim.carriers().size());
+        double target = clamp(waiting / (lanes * 8.0), 0, 1);
+        displayedQueuePressure += (target - displayedQueuePressure) * Math.min(1, dt * 6);
+        double scale = Math.max(0.025, displayedQueuePressure);
+        queuePressureBar.setScaleX(scale);
+        queuePressureBar.setTranslateX(-65 + 65 * scale);
+        queuePressureBar.setScaleY(waiting > lanes
+                ? 1 + 0.18 * Math.sin(sim.time() * 7) : 1);
+        queuePressureBar.setVisible(sim.bootT() >= 3 && waiting > 0);
+        queuePressureBar.setOpacity(0.25 + displayedQueuePressure * 0.75);
+        String pressure = waiting == 0 ? "EMPTY"
+                : waiting > lanes ? waiting + " WAITING · BACKPRESSURE"
+                : waiting + " READY";
+        queuePressureLabel.setText("RUN QUEUE · " + pressure);
+        queuePressureLabel.setVisible(waiting > 0);
+        externalIoVisible = sim.freeRun() || sim.chapter() == 2 || sim.chapter() == 3 || sim.chapter() == 5;
+        heapLabel.setVisible(externalIoVisible);
+        for (Node node : externalIoNodes) node.setVisible(externalIoVisible);
+        for (Label label : externalIoLabels) label.setVisible(externalIoVisible);
+    }
+
     private void syncParticles() {
         pickedVts.clear();
         int index = 0;
@@ -568,8 +727,14 @@ public final class MachineScene extends StackPane {
             Sphere particle = particles.get(index);
             Sphere glow = glows.get(index);
             Sphere ioMarker = ioMarkers.get(index);
+            Box stackChunk = stackChunks.get(index);
+            Cylinder ioLink = ioLinks.get(index);
+            Sphere ioSignal = ioSignals.get(index);
             VtColor color = colorFor(vt);
             double scale = scaleFor(vt);
+            boolean terminating = vt.state() == Sim.VtState.DONE || vt.state() == Sim.VtState.DEAD;
+            double dissolve = terminating ? clamp(vt.lifecycleAge(sim.time()) / 1.35, 0, 1) : 0;
+            double opacity = terminating ? Math.pow(1 - dissolve, 1.4) : 1;
             setPosition(particle, vt.pos());
             setPosition(glow, vt.pos());
             particle.setScaleX(scale);
@@ -584,23 +749,56 @@ public final class MachineScene extends StackPane {
             ioMarker.setTranslateZ(vt.pos().z);
             particle.setMaterial(materials.get(color));
             glow.setMaterial(glowMaterials.get(color));
+            particle.setOpacity(opacity);
+            glow.setOpacity(opacity * 0.75);
             particle.setVisible(true);
             boolean detail = effectiveHighQuality();
             boolean waiting = vt.state() == Sim.VtState.PARKING || vt.state() == Sim.VtState.PARKED;
             boolean important = vt.hero() || waiting
-                    || vt.id() == highlightedId && System.nanoTime() < highlightUntil
+                    || vt == followedVt
                     || vt.state() == Sim.VtState.RUNNING || vt.state() == Sim.VtState.MOUNTING
                     || (vt.carrier() != null && vt.carrier().pinned());
-            glow.setVisible(detail || important);
+            glow.setVisible(opacity > 0.02 && (detail || important));
             boolean ioBound = vt.profile() == Sim.TaskProfile.IO_BOUND;
-            ioMarker.setVisible(ioBound && !waiting && (detail || important || index % 4 == 0));
+            ioMarker.setVisible(!terminating && ioBound && !waiting && (detail || important || index % 4 == 0));
+
+            boolean stackInTransit = waiting || vt.resumed() && switch (vt.state()) {
+                case TO_QUEUE, QUEUED, MOUNTING -> true;
+                default -> false;
+            };
+            stackChunk.setTranslateX(vt.pos().x - 0.8);
+            stackChunk.setTranslateY(vt.pos().y - 3.2);
+            stackChunk.setTranslateZ(vt.pos().z + 2.4);
+            stackChunk.setRotate(Math.sin(sim.time() * 4 + vt.id()) * 12);
+            stackChunk.setOpacity(waiting ? 1 : 0.72);
+            stackChunk.setVisible(stackInTransit && (detail || important));
+
+            Vec3 endpoint = vt.ioDevice() == null ? null : ioEndpoints.get(vt.ioDevice());
+            boolean connected = externalIoVisible && waiting && endpoint != null;
+            ioLink.setVisible(connected);
+            ioSignal.setVisible(connected);
+            if (connected) {
+                setCylinderBetween(ioLink, vt.pos().x, vt.pos().y, vt.pos().z,
+                        endpoint.x, endpoint.y, endpoint.z);
+                ioLink.setOpacity(0.22 + 0.20 * (0.5 + 0.5 * Math.sin(sim.time() * 5 + vt.id())));
+                double signalT = (sim.time() * 0.72 + vt.id() * 0.071) % 1.0;
+                ioSignal.setTranslateX(lerp(vt.pos().x, endpoint.x, signalT));
+                ioSignal.setTranslateY(lerp(vt.pos().y, endpoint.y, signalT)
+                        + Math.sin(Math.PI * signalT) * 6);
+                ioSignal.setTranslateZ(lerp(vt.pos().z, endpoint.z, signalT));
+            }
             pickedVts.put(particle, vt);
             index++;
         }
         for (int i = index; i < particles.size(); i++) {
             particles.get(i).setVisible(false);
+            particles.get(i).setOpacity(1);
             glows.get(i).setVisible(false);
+            glows.get(i).setOpacity(1);
             ioMarkers.get(i).setVisible(false);
+            stackChunks.get(i).setVisible(false);
+            ioLinks.get(i).setVisible(false);
+            ioSignals.get(i).setVisible(false);
         }
     }
 
@@ -619,10 +817,11 @@ public final class MachineScene extends StackPane {
             case RUNNING -> 1.5 + 0.12 * Math.sin(sim.time() * 7 + vt.id());
             case MOUNTING -> 1.5;
             case PARKING, PARKED -> 1.15 + 0.08 * Math.sin(sim.time() * 5 + vt.id());
+            case DONE, DEAD -> 1.35 - clamp(vt.lifecycleAge(sim.time()) / 1.35, 0, 1) * 0.85;
             default -> 1;
         };
         if (vt.hero()) scale *= 1.45;
-        if (vt.id() == highlightedId && System.nanoTime() < highlightUntil) {
+        if (vt == followedVt) {
             scale *= 1.85 + 0.12 * Math.sin(sim.time() * 12);
         }
         return scale;
@@ -684,8 +883,80 @@ public final class MachineScene extends StackPane {
             badge.setVisible(true);
         }
         for (int i = badgeIndex; i < parkedBadges.size(); i++) parkedBadges.get(i).setVisible(false);
-        heapLabel.setText("I/O WAIT · " + parked + " VT" + (parked == 1 ? "" : "s")
-                + " PARKED IN HEAP");
+        int parkedTotal = sim.stats().parked();
+        heapLabel.setText("HEAP · " + parkedTotal + " PARKED STACK CHUNK" + (parkedTotal == 1 ? "" : "S")
+                + " · I/O EXTERNAL");
+    }
+
+    private void syncTerminationEffects() {
+        GraphicsContext graphics = terminationCanvas.getGraphicsContext2D();
+        graphics.clearRect(0, 0, terminationCanvas.getWidth(), terminationCanvas.getHeight());
+        for (Vt vt : sim.vts()) {
+            if (vt.state() != Sim.VtState.DONE) continue;
+            double progress = clamp(vt.lifecycleAge(sim.time()) / 1.35, 0, 1);
+            Point3D scenePoint = world.localToScene(vt.pos().x, vt.pos().y, vt.pos().z, true);
+            Point3D local = terminationCanvas.sceneToLocal(scenePoint);
+            if (!Double.isFinite(local.getX()) || !Double.isFinite(local.getY())) continue;
+            double alpha = Math.pow(1 - progress, 1.3);
+            double radius = 3 + progress * 25;
+            double size = 0.8 + (1 - progress) * 2.2;
+            graphics.setFill(Color.web("#e6edf3", alpha));
+            for (int spark = 0; spark < 10; spark++) {
+                double angle = vt.id() * 0.73 + spark * Math.PI * 2 / 10;
+                double stagger = 0.45 + (spark % 4) * 0.18;
+                double x = local.getX() + Math.cos(angle) * radius * stagger;
+                double y = local.getY() + Math.sin(angle) * radius * stagger - progress * 7;
+                graphics.fillOval(x - size / 2, y - size / 2, size, size);
+            }
+        }
+    }
+
+    private void syncFollowOverlay() {
+        if (followedVt == null) {
+            followOverlay.setVisible(false);
+            return;
+        }
+        Vt vt = followedVt;
+        followOverlay.setVisible(true);
+        followTitle.setText("FOLLOWING VT-" + vt.id() + " · " + vt.profile().display());
+        int index = 0;
+        for (Sim.LifecyclePhase phase : Sim.LifecyclePhase.values()) {
+            Label label = followDurations[index++];
+            label.setText(phase.display() + "\n"
+                    + String.format(Locale.ROOT, "%.1fs", vt.lifecycleSeconds(phase, sim.time())));
+            label.getStyleClass().remove("follow-current");
+            if (phase == vt.lifecyclePhase()) label.getStyleClass().add("follow-current");
+        }
+        String detail = switch (vt.lifecyclePhase()) {
+            case RUNNABLE -> "Waiting in the scheduler run queue";
+            case MOUNTED -> vt.carrier() == null ? "Moving onto a carrier"
+                    : "Executing on carrier C" + (vt.carrier().index() + 1)
+                            + (vt.carrier().pinned() ? " · PINNED" : "");
+            case PARKED -> "Stack chunks stored in heap · waiting on "
+                    + (vt.ioDevice() == null ? "external I/O" : vt.ioDevice().display())
+                    + (vt.live() ? "" : " · " + String.format(Locale.ROOT, "%.1fs left", Math.max(0, vt.io())));
+            case TERMINATED -> vt.state() == Sim.VtState.DONE
+                    ? "Completed · carrier released · dissolving" : "Completed · dissolved";
+        };
+        followStatus.setText(vt.lifecyclePhase().display() + " · " + detail);
+        followOverlay.setAccessibleText(followTitle.getText() + ". " + followStatus.getText());
+    }
+
+    private void syncComparisonOverlay() {
+        boolean parkMoment = sim.chapter() == 2;
+        boolean pinMoment = sim.chapter() == 4;
+        comparisonOverlay.setVisible(parkMoment || pinMoment);
+        comparisonParkCard.getStyleClass().remove("comparison-active");
+        comparisonPinCard.getStyleClass().remove("comparison-active");
+        if (parkMoment) comparisonParkCard.getStyleClass().add("comparison-active");
+        if (pinMoment) comparisonPinCard.getStyleClass().add("comparison-active");
+        int pinned = 0;
+        for (Carrier carrier : sim.carriers()) if (carrier.pinned()) pinned++;
+        int waiting = sim.stats().runnable();
+        comparisonParkValue.setText("carrier released\n" + sim.stats().parked()
+                + " stack" + (sim.stats().parked() == 1 ? "" : "s") + " in heap · " + waiting + " queued");
+        comparisonPinValue.setText("carrier retained\n" + pinned
+                + " lane" + (pinned == 1 ? "" : "s") + " blocked · " + waiting + " queued");
     }
 
     private void projectLabels() {
@@ -734,8 +1005,25 @@ public final class MachineScene extends StackPane {
     }
 
     public void highlightVt(long id) {
-        highlightedId = id;
-        highlightUntil = System.nanoTime() + 5_000_000_000L;
+        for (Vt vt : sim.vts()) {
+            if (vt.id() == id) {
+                follow(vt);
+                break;
+            }
+        }
+        tooltip.setVisible(false);
+    }
+
+    public boolean clearFollow() {
+        if (followedVt == null) return false;
+        followedVt = null;
+        followOverlay.setVisible(false);
+        return true;
+    }
+
+    private void follow(Vt vt) {
+        followedVt = vt;
+        followOverlay.setVisible(true);
         tooltip.setVisible(false);
     }
 
@@ -773,6 +1061,33 @@ public final class MachineScene extends StackPane {
         node.setTranslateX(pos.x);
         node.setTranslateY(pos.y);
         node.setTranslateZ(pos.z);
+    }
+
+    private static void setCylinderBetween(Cylinder cylinder,
+            double fromX, double fromY, double fromZ, double toX, double toY, double toZ) {
+        Point3D from = new Point3D(fromX, fromY, fromZ);
+        Point3D to = new Point3D(toX, toY, toZ);
+        Point3D delta = to.subtract(from);
+        double length = delta.magnitude();
+        if (length < 0.001) return;
+        Point3D midpoint = from.midpoint(to);
+        cylinder.setHeight(length);
+        cylinder.setTranslateX(midpoint.getX());
+        cylinder.setTranslateY(midpoint.getY());
+        cylinder.setTranslateZ(midpoint.getZ());
+        Point3D yAxis = new Point3D(0, 1, 0);
+        Point3D axis = yAxis.crossProduct(delta);
+        double cosine = clamp(yAxis.dotProduct(delta) / length, -1, 1);
+        cylinder.getTransforms().clear();
+        if (axis.magnitude() > 0.0001) {
+            cylinder.getTransforms().add(new Rotate(Math.toDegrees(Math.acos(cosine)), axis));
+        } else if (cosine < 0) {
+            cylinder.getTransforms().add(new Rotate(180, Rotate.X_AXIS));
+        }
+    }
+
+    private static double lerp(double from, double to, double amount) {
+        return from + (to - from) * amount;
     }
 
     private static PhongMaterial material(Color color) {

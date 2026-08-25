@@ -11,9 +11,9 @@ Keep the simulation model pure (no JavaFX imports) so it can be unit-tested; the
 |---|---|
 | `vtmachine.App` | Stage, root BorderPane: SubScene center, HUD right (290px), controls bottom, narration overlay via StackPane |
 | `vtmachine.model.Sim` | Pure model: tick(dt), spawn/mount/park/resume/pin/complete, chapter engine, event log ring buffer. No JavaFX types |
-| `vtmachine.model.Vt` | id, state, pos (double x,y,z), work/work0, io, carrier ref, hero flag, active tween |
+| `vtmachine.model.Vt` | id, state, lifecycle phase/timers, external I/O endpoint, pos (double x,y,z), work/work0, io, carrier ref, hero flag, active tween |
 | `vtmachine.model.Carrier` | mounted Vt, pinT countdown, heat 0..1 |
-| `vtmachine.view.MachineScene` | SubScene + world Group: slabs, cores, slots, ring, heap, VT node pool, hero trail, labels |
+| `vtmachine.view.MachineScene` | SubScene + world Group: slabs, cores, slots, ring, heap, external I/O endpoints, queue pressure, VT/stack node pools, dissolve canvas, follow/comparison overlays, hero trail, labels |
 | `vtmachine.view.CameraRig` | Orbit spherical (theta, phi, dist, targetY), presets, mouse drag/scroll, lerp-to-goal |
 | `vtmachine.view.Hud` | Counters, key-behavior flash cards, event log, narration card, speed slider, buttons |
 
@@ -37,8 +37,10 @@ World units are abstract; keep the numbers below verbatim. **IMPORTANT:** the HT
 | Mount position | (laneX(i), 30, 0) | running VT sits here; pulse scale 1.5±0.12 @ 7 rad/s |
 | Queue slot i | spiral: a=0.55i, r=7+2.6√i → (cos a·1.7r, 80.5, sin a·0.62r) | elliptical spiral fills the deck to 500 |
 | Heap slot i | x=118+((i%25)%5−2)·6.4, y=34+⌊i/25⌋·6.4, z=(⌊(i%25)/5⌋−2)·6.4 | 5×5 per level, stacks upward |
-| Task inlet / exit | spawn (−130±10, 105+rnd·12, ±10) · reclamation target (155, 10, 90) | labels "APPLICATION TASKS ↓" / "GC-ELIGIBLE BIN" |
-| Reclamation bin | open 30×18×24 bin centered near (155,9,90) | completed VTs turn white, fly inside, then disappear; eligibility wording does not claim an immediate GC cycle |
+| Task inlet | spawn (−130±10, 105+rnd·12, ±10) | label "APPLICATION TASKS ↓" |
+| Stack-chunk marker | Box 5.4×1.15×2.5 accompanying a parking or resuming VT | appears as the continuation leaves a carrier, rests in the heap, and returns to a carrier |
+| External I/O | NETWORK / DISK / TIMER / DATABASE icons at x=160, y=78, z=−52..53 | a pulsing link and travelling signal connect each parked VT to its deterministic endpoint |
+| Queue-pressure bar | Box 130×2.4×5 along the runnable deck | left-anchored scale follows runnable count; pulses and says BACKPRESSURE when waiting work exceeds carrier count |
 
 ### Color palette
 
@@ -49,7 +51,7 @@ World units are abstract; keep the numbers below verbatim. **IMPORTANT:** the HT
 | purple | #a78bfa | parked VT, scheduler, heap/continuations |
 | amber | #f5b84c | OS/CPU layer, core emissive (0.2+heat·0.9) |
 | red | #f87171 | pinned carrier + its VT, PINNED label |
-| white | #e6edf3 | completed VT in flight, headline text |
+| white | #e6edf3 | terminating VT dissolve, headline text |
 | bg/chrome | #070b12 · #0d1520 · #1a2735 | scene background/fog, HUD cards, borders |
 
 ## 3 · State Machine & Timing
@@ -69,7 +71,7 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 | Park probability | 0.30·dt while running, once per VT | resumed VTs never re-park (keeps flow legible) |
 | Parked I/O wait | 1.8 + rnd·3.0 s | then unshift to queue head, resumed=true |
 | Pin probability / duration | 0.03·dt / 2.6 + rnd·1.2 s | work frozen while pinned; carrier heat stays hot |
-| Tween durations | spawn→queue 0.7 · mount 0.55 · park 0.85 · resume 0.85 · exit 0.8 s | smoothstep e=t²(3−2t), arc: +sin(πe)·(8+rnd·10) on Y |
+| Tween durations | spawn→queue 0.7 · mount 0.55 · park 0.85 · resume 0.85 s | smoothstep e=t²(3−2t), arc: +sin(πe)·(8+rnd·10) on Y; completion dissolves at the carrier over 1.35 s |
 | Idle drift to slot | pos += (target−pos)·min(1, 4·dt) | queued + parked reflow when indices shift |
 | Flash decay / log | opacity = max(0, 1 − age/1.6) · log keeps 9 lines | HUD sync at ~6 Hz, not every frame |
 
@@ -93,7 +95,7 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 | Narration card | Bottom-left 400px overlay: CHAPTER n/6, colored title, body text, ←/Next buttons. Chapter copy: §10 verbatim |
 | Bottom bar | Pause/Run · +25 tasks · Force park · Force pin · speed Slider + readout "0.75×" |
 | Keyboard | SPACE play/pause · ←/→ chapters · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480) |
-| Hover tooltip | PickResult on the VT pool → "VT-42 · running on C2 · 63% done"; offset (+14, +10) from cursor |
+| Hover / follow | PickResult on the VT pool → tooltip; click a VT or log line to pin a lifecycle card showing RUNNABLE / MOUNTED / PARKED / TERMINATED durations |
 
 Type: Space Grotesk (UI) + IBM Plex Mono (data). Ship both as bundled TTFs via `Font.loadFont` — don't depend on system fonts on the conference machine.
 
@@ -258,7 +260,7 @@ public final class Sim {
              IO_BOUND && !resumed && work≤ioTrigger → park(vt)
              chaos && work>0.4:  r=rnd();  !resumed && r<0.30dt → park(vt)
                                             r>1−0.03dt → pin(vt)
-             work≤0 → free carrier; DONE; tween to exit 0.8s → DEAD; completed++
+             work≤0 → free carrier; DONE; hold position and dissolve for 1.35s → DEAD; completed++
 7  PARKED    io −= dt; io≤0 → resumed=true; queue.addFirst; tween to queueSlot(0) 0.85s; flash(RESUME)
 8  REAP      remove DEAD (return spheres to pool); hero dead → hero=null
 
@@ -370,9 +372,9 @@ Camera goal lerp (every frame while a goal exists): `o.θ += (g.θ−o.θ)·0.06
 
 | Input | Effect |
 |---|---|
-| Mouse press on SubScene | begin drag; cursor CLOSED_HAND; clear camera goal |
+| Mouse press on SubScene | remember the picked VT and begin a potential drag; cursor CLOSED_HAND; clear camera goal |
 | Drag | θ −= Δx·0.005 ; φ = clamp(φ − Δy·0.004, 0.15, 1.45) |
-| Release / exit | end drag; cursor OPEN_HAND |
+| Release / exit | end drag; cursor OPEN_HAND; a release within 4px follows the remembered VT instead of orbiting |
 | Scroll | dist = clamp(dist + Δy·0.4, 80, 480); clear goal |
 | Pinch gesture | `ZoomEvent.ZOOM`: dist += −ln(zoomFactor)·420; clamp 80–480; clear goal |
 | Mouse move (not dragging) | pick → tooltip (§14); recheck every 3rd frame is fine |
@@ -412,7 +414,7 @@ Log line format: `%03ds %s` where the integer is floor(sim.t). Every message the
 | I/O completes | `VT-{id} I/O done · runnable` |
 | pin | `VT-{id} PINNED on C{n}` |
 | pin expires | `VT-{id} unpinned · resumes` |
-| complete | `VT-{id} completed · C{n} free · GC eligible` |
+| complete | `VT-{id} completed · C{n} free · terminated` |
 | burst button | `burst: 25 tasks submitted` |
 | force park, none eligible | `no unpinned running VT` |
 | force pin, none eligible | `no running VT` |
@@ -439,8 +441,8 @@ switch i:
   3 RESUME: p = first PARKED vt; if p: p.io = min(p.io, 0.8)
             else: burst += 2; pendingPark = true    // will park then quickly resume
             camera CARRIERS; log "chapter: resume"
-  4 PINNED: if no RUNNING vt: burst += 4
-            pendingPin = true; camera CARRIERS; log "chapter: pinned"
+  4 PINNED: if no RUNNING vt: burst += 4; burst += carriers*3
+            pendingPin = true; camera CARRIERS; log "chapter: pinned" // keeps work queued behind the pin
   5 SCALE:  burst += maxThreads − vts.size; chaos = true; camera OVERVIEW
             log "chapter: scale — flooding tasks"
 ```
@@ -465,11 +467,12 @@ Rendering: each label is a canvas-drawn texture `600 {px}px IBM Plex Mono` on tr
 | CARRIER THREADS | #60a5fa | (−81, 33, 0) | 28 | right-middle |
 | SCHEDULER · ForkJoinPool | #a78bfa | (−81, 59, 0) | 28 | right-middle |
 | VIRTUAL THREADS · runnable | #34d399 | (−91, 85, 0) | 28 | right-middle |
-| I/O WAIT · {n} VTs · PARKED STACK CHUNKS | #a78bfa | (118, 74, 0) | 28 | center; live count plus up to 12 projected VT-id badges |
+| HEAP · {n} PARKED STACK CHUNKS · I/O EXTERNAL | #a78bfa | (118, 74, 0) | 28 | center; live count plus up to 12 projected VT-id badges |
+| RUN QUEUE · {state} | #34d399 | (0, 91, 28) | 28 | expands with runnable pressure and announces BACKPRESSURE above carrier capacity |
+| EXTERNAL I/O + endpoint labels | #a78bfa | x=160, y=78, z=−52..53 | 22–28 | network, disk, timer, and database wait destinations |
 | C1…Cn | #8ea2b8 | (laneX(i), 22, 16) | 24 | center |
 | PINNED (per lane, hidden unless pinned) | #f87171 | (laneX(i), 40, 0) | 28 | center |
 | APPLICATION TASKS ↓ | #7d8fa3 | (−130, 112, 0) | 28 | center |
-| GC ELIGIBLE bin overlay | #c4d3e3 | screen bottom-right above shortcuts | fixed 2D destination marker; accessible description clarifies collection is not immediate |
 | VT-{heroId} (follows hero) | #6ee7b7 | hero.pos + (0, 8, 0) | 24 | center |
 
 Hero trail: 36-point ring buffer, seeded at (0,−999,0) (off-scene) so it doesn't streak on first frames; per-vertex color ramp from black to rgb(0.43, 0.91, 0.72) (= #6ee7b7) tail→head; line opacity 0.9.

@@ -54,6 +54,16 @@ class SimTest {
     }
 
     @Test
+    void pinnedChapterCreatesVisibleQueuePressureBehindTheBlockedCarrier() {
+        Sim sim = runningMachine(23);
+        sim.gotoChapter(4);
+        advance(sim, 0.25);
+
+        assertTrue(sim.carriers().stream().anyMatch(Carrier::pinned));
+        assertTrue(sim.stats().runnable() > 0, "the comparison should show work waiting behind saturated lanes");
+    }
+
+    @Test
     void sameSeedAndFixedStepsProduceTheSameEventLog() {
         Sim first = new Sim(4, 100, 4.0, 8675309);
         Sim second = new Sim(4, 100, 4.0, 8675309);
@@ -120,6 +130,41 @@ class SimTest {
 
         advance(sim, 12);
         assertTrue(sim.averageIoSeconds() > 0, "I/O-bound tasks should visibly park and resume");
+    }
+
+    @Test
+    void followedLifecycleRecordsDurationsAndCompletionDissolvesAtTheCarrier() {
+        Sim sim = runningMachine(4242);
+        assertTrue(sim.forcePark());
+        Vt followed = sim.vts().stream()
+                .filter(vt -> vt.state() == Sim.VtState.PARKING)
+                .findFirst().orElseThrow();
+
+        assertTrue(followed.lifecycleSeconds(Sim.LifecyclePhase.MOUNTED, sim.time()) > 0);
+        assertTrue(followed.ioDevice() != null, "every parked VT should connect to an external I/O endpoint");
+        advance(sim, 0.9);
+        assertEquals(Sim.LifecyclePhase.PARKED, followed.lifecyclePhase());
+
+        followed.work = 10;
+        followed.io = 0.05;
+        advance(sim, 1.6);
+        assertTrue(followed.lifecycleSeconds(Sim.LifecyclePhase.PARKED, sim.time()) > 0.05);
+        assertEquals(Sim.VtState.RUNNING, followed.state());
+        followed.work = 0.01;
+        advance(sim, 0.2);
+
+        assertEquals(Sim.VtState.DONE, followed.state());
+        assertEquals(Sim.LifecyclePhase.TERMINATED, followed.lifecyclePhase());
+        assertTrue(Math.abs(followed.pos().x) <= 70, "completion should dissolve at its carrier lane");
+        assertTrue(sim.log().stream().anyMatch(line -> line.contains("free · terminated")));
+
+        advance(sim, 1.5);
+        assertFalse(sim.vts().contains(followed), "the dissolve should eventually leave the scene");
+        double terminatedSeconds = followed.lifecycleSeconds(Sim.LifecyclePhase.TERMINATED, sim.time());
+        advance(sim, 1.0);
+        assertEquals(terminatedSeconds,
+                followed.lifecycleSeconds(Sim.LifecyclePhase.TERMINATED, sim.time()), 1e-9,
+                "the follow card should freeze its final duration after the dissolve");
     }
 
     @Test

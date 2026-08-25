@@ -5,7 +5,7 @@ park, resume, and pin across a small carrier pool. The implementation follows
 [`design/JavaFX-Spec.md`](design/JavaFX-Spec.md) and uses the accompanying HTML
 simulation as its behavioral reference.
 
-![The Virtual Thread Machine demonstrating ten carrier lanes, heap-backed I/O waits, and GC-eligible completed threads](docs/media/virtual-thread-machine-demo.gif)
+![The Virtual Thread Machine demonstrating ten carrier lanes, heap-backed I/O waits, and virtual-thread completion](docs/media/virtual-thread-machine-demo.gif)
 
 ## Run
 
@@ -40,6 +40,9 @@ expose ordinary virtual-thread carrier identity.
 - `F11`: toggle full screen
 - Mouse drag: orbit
 - Mouse wheel/trackpad scroll or two-finger pinch: zoom in and out
+- Click a VT or one of its event-log entries: follow its lifecycle and time in
+  each state
+- `Esc` or the lifecycle card's × button: stop following a VT
 - HUD controls: switch synthetic/live feeds, add 25 tasks, force a park or
   demonstration pin, change speed, or restart with new demo settings
 
@@ -51,15 +54,17 @@ accessible descriptions.
 
 Tasks deliberately have different profiles and seeded random durations: short
 CPU work, longer compute work, and I/O-bound work with randomized 1–8 second
-waits. I/O-bound VTs carry a small purple satellite before blocking, then turn
-purple and move into the heap-backed I/O area while unmounted. Parked particles
-retain their glow, receive an on-screen VT badge, and are included in the heap's
-live parked-count label.
+waits. I/O-bound VTs carry a small purple satellite before blocking. When they
+park, a stack-chunk marker moves from the released carrier into the heap while
+an animated connection continues to an external network, disk, timer, or
+database endpoint. The continuation returns through the run queue before
+mounting on any available carrier.
 
-Completed VTs turn white and fly into a small `TERMINATED · GC ELIGIBLE`
-reclamation bin before disappearing. The wording is intentional: termination
-makes an unreferenced VT eligible for collection, but does not imply that the
-garbage collector ran immediately.
+Clicking a VT opens a live lifecycle strip for `RUNNABLE`, `MOUNTED`, `PARKED`,
+and `TERMINATED` durations. The PARK and PINNED chapters compare carrier release
+with carrier retention directly, while a pressure bar expands and contracts
+with the scheduler run queue. Completed VTs release their carrier, turn white,
+and dissolve in place.
 
 ## Reproducible settings
 
@@ -81,7 +86,9 @@ Supported settings:
 For visual smoke tests, `--snapshot=/path/image.ppm` writes a full-window PPM
 after 4.5 seconds. Override the delay with `--snapshot-at=<seconds>`.
 Use `--snapshot-chapter=1..6` to capture a specific chapter. The helper script
-`scripts/capture-chapters.sh` captures all six with seed 42.
+`scripts/capture-chapters.sh` captures all six with seed 42. Add
+`--snapshot-follow` to include the selected hero VT's lifecycle card in a
+visual smoke test.
 
 ## Test
 

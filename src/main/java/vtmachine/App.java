@@ -177,6 +177,12 @@ public final class App extends Application {
                 speakerNotes.sync(wallTime, fps, autoplay);
                 if (!snapshotWritten && settings.snapshotPath != null && wallTime >= settings.snapshotAt) {
                     snapshotWritten = true;
+                    if (settings.snapshotFollow && sim.hero() != null) {
+                        machine.highlightVt(sim.hero().id());
+                        machine.sync(0);
+                        appScene.getRoot().applyCss();
+                        appScene.getRoot().layout();
+                    }
                     writeSnapshot(Path.of(settings.snapshotPath));
                     Platform.exit();
                 }
@@ -215,6 +221,7 @@ public final class App extends Application {
                 case N -> speakerNotes.toggle();
                 case ESCAPE -> {
                     if (presenterMode) setPresenterMode(false);
+                    else machine.clearFollow();
                 }
                 default -> { }
             }
@@ -291,7 +298,7 @@ public final class App extends Application {
             try { selectedSeed = Long.parseLong(seed.getText().trim()); }
             catch (NumberFormatException invalid) { selectedSeed = settings.seed; }
             rebuild(new Settings(carriers.getValue(), maxThreads.getValue(), taskRate.getValue(),
-                    selectedSeed, live.isSelected(), settings.presenter, null, 4.5, 0));
+                    selectedSeed, live.isSelected(), settings.presenter, null, 4.5, 0, false));
             machine.requestFocus();
         });
     }
@@ -352,10 +359,10 @@ public final class App extends Application {
 
     record Settings(int carriers, int maxThreads, double taskRate, long seed,
             boolean live, boolean presenter, String snapshotPath, double snapshotAt,
-            int snapshotChapter) {
+            int snapshotChapter, boolean snapshotFollow) {
         Settings withLive(boolean enabled) {
             return new Settings(carriers, maxThreads, taskRate, seed, enabled, presenter,
-                    snapshotPath, snapshotAt, snapshotChapter);
+                    snapshotPath, snapshotAt, snapshotChapter, snapshotFollow);
         }
 
         static Settings from(List<String> args) {
@@ -375,7 +382,8 @@ public final class App extends Application {
                     Boolean.parseBoolean(values.getOrDefault("presenter", "false")),
                     values.get("snapshot"),
                     boundedDouble(values.get("snapshot-at"), 4.5, 0.5, 30.0),
-                    boundedInt(values.get("snapshot-chapter"), 0, 0, 6));
+                    boundedInt(values.get("snapshot-chapter"), 0, 0, 6),
+                    Boolean.parseBoolean(values.getOrDefault("snapshot-follow", "false")));
         }
 
         private static int boundedInt(String value, int fallback, int min, int max) {
