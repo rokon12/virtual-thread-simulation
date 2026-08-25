@@ -61,6 +61,8 @@ public final class MachineScene extends StackPane {
     private enum AnchorAlignment { CENTER, RIGHT }
     private record ProjectedLabel(Group anchor, Label label, AnchorAlignment alignment) {}
     private record BootLayer(Group group, double restY, int order) {}
+    private record CoreActivity(Group indicator, Group rotor, Sphere pulse,
+            Cylinder piston, List<Sphere> sparks) {}
 
     private final Sim sim;
     private final Group root3d = new Group();
@@ -87,6 +89,8 @@ public final class MachineScene extends StackPane {
     private final List<BootLayer> bootLayers = new ArrayList<>();
     private final List<ProjectedLabel> projectedLabels = new ArrayList<>();
     private final List<Shape3D> cores = new ArrayList<>();
+    private final List<CoreActivity> coreActivities = new ArrayList<>();
+    private final List<Cylinder> carrierPillars = new ArrayList<>();
     private final List<TorusMesh> slots = new ArrayList<>();
     private final List<Label> pinnedLabels = new ArrayList<>();
     private final List<Sphere> particles = new ArrayList<>();
@@ -99,6 +103,7 @@ public final class MachineScene extends StackPane {
     private final List<Node> externalIoNodes = new ArrayList<>();
     private final List<Label> externalIoLabels = new ArrayList<>();
     private final List<Box> databasePermitSlots = new ArrayList<>();
+    private final List<Group> applicationTaskCards = new ArrayList<>();
     private final List<Sphere> trail = new ArrayList<>();
     private final Map<Node, ThreadView> pickedVts = new IdentityHashMap<>();
     private final EnumMap<VtColor, PhongMaterial> materials = new EnumMap<>(VtColor.class);
@@ -110,6 +115,9 @@ public final class MachineScene extends StackPane {
     private final PhongMaterial activeSlot = material(BLUE);
     private final PhongMaterial pinnedSlot = material(RED);
     private final PhongMaterial pinnedCore = material(Color.web("#8f2f31"));
+    private final PhongMaterial coreActivityIdle = material(Color.web("#5d461f"));
+    private final PhongMaterial coreActivityActive = material(Color.web("#ffd275"));
+    private final PhongMaterial coreActivityPinned = material(RED);
     private final PhongMaterial schedulerBright = material(PURPLE);
     private final PhongMaterial schedulerDim = material(Color.web("#2a2145"));
     private final PhongMaterial stackChunkMaterial = material(Color.web("#c4b5fd"));
@@ -120,6 +128,7 @@ public final class MachineScene extends StackPane {
 
     private TorusMesh schedulerRing;
     private Box queuePressureBar;
+    private Group applicationTaskIngress;
     private Group heapGhost;
     private Label heapLabel;
     private Label queuePressureLabel;
@@ -336,6 +345,7 @@ public final class MachineScene extends StackPane {
         world.getChildren().add(queuePressureBar);
 
         buildExternalIo();
+        buildApplicationTaskIngress();
 
         addProjectedLabel("OS THREADS / CPU CORES", "amber", -81, 7, 0, AnchorAlignment.RIGHT);
         addProjectedLabel("CARRIER THREADS", "blue", -81, 33, 0, AnchorAlignment.RIGHT);
@@ -345,7 +355,48 @@ public final class MachineScene extends StackPane {
                 118, 74, 0, AnchorAlignment.CENTER);
         queuePressureLabel = addProjectedLabel("RUN QUEUE · EMPTY", "green",
                 0, 91, 28, AnchorAlignment.CENTER);
-        addProjectedLabel("APPLICATION TASKS ↓", "muted", -130, 112, 0, AnchorAlignment.CENTER);
+        addProjectedLabel("APPLICATION TASKS · SUBMIT ↓", "muted",
+                Sim.TASK_INLET_X, 102, Sim.TASK_INLET_Z,
+                AnchorAlignment.CENTER);
+    }
+
+    private void buildApplicationTaskIngress() {
+        applicationTaskIngress = new Group();
+        applicationTaskIngress.setTranslateX(Sim.TASK_INLET_X);
+        applicationTaskIngress.setTranslateZ(Sim.TASK_INLET_Z);
+        applicationTaskIngress.setMouseTransparent(true);
+
+        addBoxWithEdges(applicationTaskIngress, 34, 1.8, 23, 0, 83, 0,
+                Color.web("#101a27"), Color.web("#6ee7b7"));
+        PhongMaterial chuteMaterial = transparentMaterial(GREEN, 0.7);
+        for (int side : new int[] {-1, 1}) {
+            Box chuteRail = new Box(0.65, 4, 0.65);
+            chuteRail.setTranslateX(side * 8.5);
+            chuteRail.setTranslateY(81.5);
+            chuteRail.setMaterial(chuteMaterial);
+            applicationTaskIngress.getChildren().add(chuteRail);
+        }
+
+        Color[] cardColors = {GREEN, BLUE, PURPLE};
+        for (int i = 0; i < cardColors.length; i++) {
+            Group card = new Group();
+            Box body = new Box(10, 5.8, 4.0);
+            body.setMaterial(material(Color.web("#dbeafe")));
+            body.setCullFace(CullFace.NONE);
+            Box codeLine = new Box(6.2, 0.45, 4.15);
+            codeLine.setTranslateY(0.8);
+            codeLine.setMaterial(material(cardColors[i]));
+            Box codeLineShort = new Box(4.2, 0.38, 4.16);
+            codeLineShort.setTranslateX(-1);
+            codeLineShort.setTranslateY(-0.8);
+            codeLineShort.setMaterial(material(cardColors[i].interpolate(WHITE, 0.35)));
+            card.getChildren().addAll(body, codeLine, codeLineShort);
+            card.setTranslateX((i - 1) * 6.4);
+            card.setRotationAxis(Rotate.Y_AXIS);
+            applicationTaskCards.add(card);
+            applicationTaskIngress.getChildren().add(card);
+        }
+        world.getChildren().add(applicationTaskIngress);
     }
 
     /** An open wire basket keeps parked VTs visible instead of tinting them through a solid cube. */
@@ -501,7 +552,42 @@ public final class MachineScene extends StackPane {
         core.setTranslateY(6);
         core.setMaterial(coreHeatMaterials.getFirst());
         core.setCullFace(CullFace.NONE);
+        core.setRotationAxis(Rotate.Y_AXIS);
         cores.add(core);
+
+        Group indicator = new Group();
+        indicator.setTranslateX(x);
+        indicator.setTranslateY(6);
+        TorusMesh activityRing = new TorusMesh(7.6f, 0.38f, 32, 8);
+        activityRing.setMaterial(coreActivityIdle);
+        Group rotor = new Group();
+        rotor.setRotationAxis(Rotate.Y_AXIS);
+        for (int blade = 0; blade < 3; blade++) {
+            Box arm = new Box(11.5, 0.5, 1.15);
+            arm.setRotationAxis(Rotate.Y_AXIS);
+            arm.setRotate(blade * 60);
+            arm.setMaterial(coreActivityIdle);
+            rotor.getChildren().add(arm);
+        }
+        Sphere pulse = new Sphere(0.9, 8);
+        pulse.setTranslateX(7.6);
+        pulse.setMaterial(coreActivityIdle);
+        rotor.getChildren().add(pulse);
+        Cylinder piston = new Cylinder(1.15, 9, 10);
+        piston.setTranslateY(8.5);
+        piston.setTranslateZ(30);
+        piston.setMaterial(coreActivityIdle);
+        indicator.getChildren().add(piston);
+        List<Sphere> sparks = new ArrayList<>();
+        for (int sparkIndex = 0; sparkIndex < 3; sparkIndex++) {
+            Sphere spark = new Sphere(0.62, 7);
+            spark.setMaterial(coreActivityIdle);
+            spark.setVisible(false);
+            sparks.add(spark);
+            indicator.getChildren().add(spark);
+        }
+        indicator.getChildren().addAll(activityRing, rotor);
+        coreActivities.add(new CoreActivity(indicator, rotor, pulse, piston, sparks));
 
         TorusMesh slot = new TorusMesh(6, 0.7f, 32, 8);
         slot.setTranslateX(x);
@@ -514,7 +600,8 @@ public final class MachineScene extends StackPane {
         pillar.setTranslateY(15);
         pillar.setMaterial(transparentMaterial(BLUE, 0.18));
         pillar.setCullFace(CullFace.NONE);
-        world.getChildren().addAll(core, pillar, slot);
+        carrierPillars.add(pillar);
+        world.getChildren().addAll(core, indicator, pillar, slot);
 
         addProjectedLabel("C" + (index + 1), "lane", x, 22, 16, AnchorAlignment.CENTER)
                 .setStyle("-fx-font-size: 10px;");
@@ -727,6 +814,7 @@ public final class MachineScene extends StackPane {
         double schedulerRise = clamp((displayBootT() - 1.0) / 0.5, 0, 1);
         schedulerRing.setMaterial(schedulerRise > 0.6 ? schedulerBright : schedulerDim);
         syncCarriers();
+        syncApplicationTaskIngress();
         syncQueuePressure(dt);
         camera.sync();
         syncParticles();
@@ -751,16 +839,78 @@ public final class MachineScene extends StackPane {
     private void syncCarriers() {
         for (int i = 0; i < displayCarrierCount(); i++) {
             boolean pinned = displayCarrierPinned(i);
+            boolean working = displayCarrierMounted(i);
             int heatLevel = (int) Math.round(clamp(displayCarrierHeat(i), 0, 1)
                     * (coreHeatMaterials.size() - 1));
-            cores.get(i).setMaterial(pinned ? pinnedCore : coreHeatMaterials.get(heatLevel));
+            Shape3D core = cores.get(i);
+            core.setMaterial(pinned ? pinnedCore : coreHeatMaterials.get(heatLevel));
             slots.get(i).setMaterial(pinned ? pinnedSlot
-                    : displayCarrierMounted(i) ? activeSlot : idleSlot);
+                    : working ? activeSlot : idleSlot);
             double scale = pinned ? 1 + Math.sin(displayTime() * 8) * 0.08 : 1;
             slots.get(i).setScaleX(scale);
             slots.get(i).setScaleY(scale);
             slots.get(i).setScaleZ(scale);
             pinnedLabels.get(i).setVisible(pinned);
+
+            CoreActivity activity = coreActivities.get(i);
+            PhongMaterial activityMaterial = pinned ? coreActivityPinned
+                    : working ? coreActivityActive : coreActivityIdle;
+            for (Node node : activity.indicator().getChildren()) {
+                if (node instanceof Shape3D shape) shape.setMaterial(activityMaterial);
+            }
+            for (Node node : activity.rotor().getChildren()) {
+                if (node instanceof Shape3D shape) shape.setMaterial(activityMaterial);
+            }
+            double rotorSpeed = pinned ? 42 : working ? 260 + heatLevel * 48 : 12;
+            activity.rotor().setRotate(displayTime() * rotorSpeed + i * 37);
+            activity.indicator().setOpacity(pinned || working ? 0.95 : 0.2);
+            double workPulse = pinned
+                    ? 1 + 0.22 * Math.sin(displayTime() * 8 + i)
+                    : working ? 1 + 0.16 * Math.sin(displayTime() * 11 + i) : 0.75;
+            activity.pulse().setScaleX(workPulse);
+            activity.pulse().setScaleY(workPulse);
+            activity.pulse().setScaleZ(workPulse);
+            activity.piston().setScaleY(pinned ? 0.72 + 0.16 * Math.sin(displayTime() * 8 + i)
+                    : working ? 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(displayTime() * 11 + i))
+                    : 0.18);
+            core.setScaleY(pinned
+                    ? 1 + 0.08 * Math.sin(displayTime() * 8 + i)
+                    : working ? 1 + 0.045 * Math.sin(displayTime() * 11 + i) : 1);
+            core.setTranslateY(6 + (working && !pinned
+                    ? 0.45 * (0.5 + 0.5 * Math.sin(displayTime() * 11 + i)) : 0));
+            core.setRotate(pinned ? Math.sin(displayTime() * 8 + i) * 9
+                    : working ? displayTime() * 70 + i * 31 : 0);
+            Cylinder pillar = carrierPillars.get(i);
+            pillar.setMaterial(pinned ? coreActivityPinned
+                    : working ? coreActivityActive : activeSlot);
+            pillar.setOpacity(pinned || working ? 0.9 : 0.18);
+            pillar.setScaleY(pinned ? 0.92 + 0.08 * Math.sin(displayTime() * 8 + i)
+                    : working ? 0.94 + 0.06 * Math.sin(displayTime() * 11 + i) : 1);
+            for (int sparkIndex = 0; sparkIndex < activity.sparks().size(); sparkIndex++) {
+                Sphere spark = activity.sparks().get(sparkIndex);
+                double sparkSpeed = pinned ? 0.55 : 1.75;
+                double cycle = (displayTime() * sparkSpeed + sparkIndex / 3.0 + i * 0.13) % 1;
+                spark.setTranslateX((sparkIndex - 1) * 2.1
+                        + Math.sin(displayTime() * 4 + sparkIndex) * 0.55);
+                spark.setTranslateY(4.5 + cycle * 13);
+                spark.setTranslateZ(30 + Math.cos(displayTime() * 3 + sparkIndex) * 1.4);
+                spark.setOpacity((1 - cycle) * (pinned ? 0.75 : 1));
+                spark.setVisible(working || pinned);
+            }
+        }
+    }
+
+    private void syncApplicationTaskIngress() {
+        double bootOpacity = clamp((displayBootT() - 2.4) / 0.6, 0, 1);
+        applicationTaskIngress.setOpacity(bootOpacity);
+        boolean flowing = displayVts().stream().anyMatch(vt -> vt.state() != Sim.VtState.DEAD);
+        for (int i = 0; i < applicationTaskCards.size(); i++) {
+            Group card = applicationTaskCards.get(i);
+            double cycle = (displayTime() * 0.46 + i / (double) applicationTaskCards.size()) % 1;
+            card.setTranslateY(94 - cycle * 10);
+            card.setTranslateZ(Math.sin(displayTime() * 1.7 + i) * 2.2);
+            card.setRotate(Math.sin(displayTime() * 2.3 + i) * 9);
+            card.setOpacity(flowing ? 0.2 + Math.sin(Math.PI * cycle) * 0.8 : 0.18);
         }
     }
 

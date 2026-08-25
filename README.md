@@ -57,6 +57,11 @@ hides nonessential glows when frame rate drops or the task pool becomes dense.
 The layout compacts below 1280 px and all controls expose keyboard focus and
 accessible descriptions.
 
+At the top of the machine, animated code cards pass through the application
+task inlet before becoming runnable virtual threads. At the bottom, each OS/CPU
+core has a small work rotor: it spins brightly while its carrier executes,
+rests when idle, and turns into a slow red warning pulse while pinned.
+
 The rolling timeline retains the latest 360 display snapshots. Entering history
 automatically pauses the live model, updates the 3D particles, counters, event
 log, narration, lifecycle card, and speaker notes to the selected instant, and

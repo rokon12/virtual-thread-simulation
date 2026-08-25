@@ -31,16 +31,18 @@ World units are abstract; keep the numbers below verbatim. **IMPORTANT:** the HT
 | Layer 1 · Carriers slab | Box 150×3.5×56 @ y=26 | fill #0a1626, edge #60a5fa |
 | Layer 2 · Scheduler slab | Box 150×3.5×50 @ y=52 | fill #150f2b, edge #a78bfa; rotating torus r=14 tube=0.9 @ y=56, spin 1.5 rad/s |
 | Layer 3 · Runnable deck | Box 170×3.5×66 @ y=78 | fill #0a2018, edge #34d399 |
-| Heap tower | Box 40×3.5×40 @ (118,30,0); ghost column Box 36×44×36 @ (118,54,0), opacity .07 | edge #a78bfa; parked VTs stack above |
+| Heap basket | Box 40×3.5×40 @ (118,30,0); open 36×44×36 wire rails above | edge #a78bfa; full-size parked VTs remain unobstructed inside |
 | Core i (i=0..C−1) | Box 12×8×12 @ (laneX(i), 6, 0) | laneX(i) = (i−(C−1)/2)·min(26,130/(C−1)); C=4 default, clamp 2–10 |
 | Carrier slot i | Torus r=6 tube=0.7 @ (laneX(i), 28.4, 0), flat | idle #24425f · occupied #60a5fa · pinned #f87171 + pulse scale ±8% @ 8 rad/s |
-| Lane pillar i | Cylinder r=0.5 h=26 @ (laneX(i), 15, 0) | #60a5fa @ 18% opacity |
+| Lane pillar i | Cylinder r=0.5 h=26 @ (laneX(i), 15, 0) | dim blue at idle; bright amber work pulse while mounted; red stutter while pinned |
 | VT particle | Sphere r=1.9 (pool of maxThreads+40) | plus glow shell Sphere r=3.6, opacity .22 (see §5) |
 | Mount position | (laneX(i), 30, 0) | running VT sits here; pulse scale 1.5±0.12 @ 7 rad/s |
 | Queue slot i | spiral: a=0.55i, r=7+2.6√i → (cos a·1.7r, 80.5, sin a·0.62r) | elliptical spiral fills the deck to 500 |
-| Heap slot i | x=118+((i%25)%5−2)·6.4, y=34+⌊i/25⌋·6.4, z=(⌊(i%25)/5⌋−2)·6.4 | 5×5 per level, stacks upward |
-| Task inlet | spawn (−130±10, 105+rnd·12, ±10) | label "APPLICATION TASKS ↓" |
+| Heap slot i | x=118+((i%25)%5−2)·6.8, y=34+⌊i/25⌋·6.8, z=(⌊(i%25)/5⌋−2)·6.8 | 5×5 per level, stacks upward |
+| Task inlet | spawn (−70±8, 90+rnd·8, 24±8) | label "APPLICATION TASKS · SUBMIT ↓" |
+| Task ingress | open 34×23 submission tray at (−70,0,24) with three descending code cards | cards loop toward the runnable layer while work is active |
 | Stack-chunk marker | Box 5.4×1.15×2.5 accompanying a parking or resuming VT | appears as the continuation leaves a carrier, rests in the heap, and returns to a carrier |
+| Core activity rotor i | Torus r=7.6, three-blade rotor, front piston, and rising sparks @ (laneX(i),6,0) | surrounds the core; amber fast spin while working, dim at idle, slow red pulse while pinned |
 | External I/O | NETWORK / DISK / TIMER / DATABASE icons at x=160, y=78, z=−52..53 | a pulsing link and travelling signal connect each parked VT to its deterministic endpoint |
 | Queue-pressure bar | Box 130×2.4×5 along the runnable deck | left-anchored scale follows runnable count; pulses and says BACKPRESSURE when waiting work exceeds carrier count |
 
@@ -493,7 +495,7 @@ Rendering: each label is a canvas-drawn texture `600 {px}px IBM Plex Mono` on tr
 | EXTERNAL I/O + endpoint labels | #a78bfa | x=160, y=78, z=−52..53 | 22–28 | network, disk, timer, and database wait destinations |
 | C1…Cn | #8ea2b8 | (laneX(i), 22, 16) | 24 | center |
 | PINNED (per lane, hidden unless pinned) | #f87171 | (laneX(i), 40, 0) | 28 | center |
-| APPLICATION TASKS ↓ | #7d8fa3 | (−130, 112, 0) | 28 | center |
+| APPLICATION TASKS · SUBMIT ↓ | #7d8fa3 | (−70, 102, 24) | 28 | center; animated code-card tray beneath |
 | VT-{heroId} (follows hero) | #6ee7b7 | hero.pos + (0, 8, 0) | 24 | center |
 
 Hero trail: 36-point ring buffer, seeded at (0,−999,0) (off-scene) so it doesn't streak on first frames; per-vertex color ramp from black to rgb(0.43, 0.91, 0.72) (= #6ee7b7) tail→head; line opacity 0.9.

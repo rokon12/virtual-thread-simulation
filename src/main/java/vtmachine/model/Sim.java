@@ -27,6 +27,8 @@ public final class Sim {
     public static final double DEFAULT_TASK_RATE = 1.4;
     public static final int CHAPTER_COUNT = 10;
     public static final int DATABASE_PERMITS = 3;
+    public static final double TASK_INLET_X = -70;
+    public static final double TASK_INLET_Z = 24;
 
     public record Stats(int runnable, int mounted, int parked, int completed) {}
     public record ProfileStats(int fast, int compute, int ioBound) {}
@@ -370,9 +372,10 @@ public final class Sim {
                 ? scenario == Scenario.RESOURCE_POOL ? IoDevice.DATABASE
                         : IoDevice.values()[random.nextInt(IoDevice.values().length)] : null;
         Vt vt = new Vt(nextId++, new Vec3(
-                -130 + random.nextDouble() * 20 - 10,
-                105 + random.nextDouble() * 12,
-                random.nextDouble() * 20 - 10), work, profile, plannedIo, ioTrigger, ioDevice, time);
+                TASK_INLET_X + random.nextDouble() * 16 - 8,
+                90 + random.nextDouble() * 8,
+                TASK_INLET_Z + random.nextDouble() * 16 - 8), work, profile,
+                plannedIo, ioTrigger, ioDevice, time);
         configureScenarioTask(vt);
         if (hero == null) {
             hero = vt;
@@ -501,9 +504,9 @@ public final class Sim {
         double plannedIo = profile == TaskProfile.IO_BOUND
                 ? Math.max(2.5, event.plannedIoSeconds()) : 0;
         Vt vt = new Vt(event.threadId(), new Vec3(
-                -130 + random.nextDouble() * 20 - 10,
-                105 + random.nextDouble() * 12,
-                random.nextDouble() * 20 - 10), 1.0, profile,
+                TASK_INLET_X + random.nextDouble() * 16 - 8,
+                90 + random.nextDouble() * 8,
+                TASK_INLET_Z + random.nextDouble() * 16 - 8), 1.0, profile,
                 plannedIo, -1,
                 profile == TaskProfile.IO_BOUND
                         ? scenario == Scenario.RESOURCE_POOL ? IoDevice.DATABASE
