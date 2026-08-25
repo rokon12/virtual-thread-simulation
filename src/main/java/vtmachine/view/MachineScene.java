@@ -11,6 +11,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Point3D;
 import javafx.geometry.Pos;
 import javafx.scene.AmbientLight;
+import javafx.scene.AccessibleRole;
 import javafx.scene.Cursor;
 import javafx.scene.DepthTest;
 import javafx.scene.Group;
@@ -21,10 +22,12 @@ import javafx.scene.SubScene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.input.ZoomEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.paint.PhongMaterial;
 import javafx.scene.shape.Box;
@@ -49,6 +52,7 @@ public final class MachineScene extends StackPane {
     private static final Color WHITE = Color.web("#e6edf3");
 
     private enum VtColor { GREEN, BLUE, PURPLE, RED, WHITE }
+    public enum Quality { AUTO, HIGH, LOW }
     private enum AnchorAlignment { CENTER, RIGHT }
     private record ProjectedLabel(Group anchor, Label label, AnchorAlignment alignment) {}
     private record BootLayer(Group group, double restY, int order) {}
@@ -60,6 +64,10 @@ public final class MachineScene extends StackPane {
     private final Pane labelOverlay = new Pane();
     private final CameraRig camera = new CameraRig();
     private final Label tooltip = new Label();
+    private final HBox cameraButtons;
+    private final Label shortcut;
+    private final Label diagnostics = new Label("-- FPS · AUTO/HIGH");
+    private final VBox gcBinOverlay = buildGcBinOverlay();
 
     private final List<BootLayer> bootLayers = new ArrayList<>();
     private final List<ProjectedLabel> projectedLabels = new ArrayList<>();
@@ -68,6 +76,8 @@ public final class MachineScene extends StackPane {
     private final List<Label> pinnedLabels = new ArrayList<>();
     private final List<Sphere> particles = new ArrayList<>();
     private final List<Sphere> glows = new ArrayList<>();
+    private final List<Sphere> ioMarkers = new ArrayList<>();
+    private final List<Label> parkedBadges = new ArrayList<>();
     private final List<Sphere> trail = new ArrayList<>();
     private final Map<Node, Vt> pickedVts = new IdentityHashMap<>();
     private final EnumMap<VtColor, PhongMaterial> materials = new EnumMap<>(VtColor.class);
@@ -83,14 +93,23 @@ public final class MachineScene extends StackPane {
 
     private TorusMesh schedulerRing;
     private Shape3D heapGhost;
+    private Label heapLabel;
     private Label heroLabel;
     private long heroId = -1;
+    private long highlightedId = -1;
+    private long highlightUntil;
     private boolean dragging;
+    private Quality requestedQuality = Quality.AUTO;
+    private boolean autoLow;
+    private boolean highContrast;
 
     public MachineScene(Sim sim) {
         this.sim = sim;
         setMinSize(0, 0);
         setStyle("-fx-background-color: #070b12;");
+        setFocusTraversable(true);
+        setAccessibleRole(AccessibleRole.PARENT);
+        setAccessibleText("Interactive three-dimensional virtual-thread scheduler. Drag to orbit; scroll or pinch to zoom.");
         root3d.setDepthTest(DepthTest.ENABLE);
         world.getTransforms().add(new Scale(1, -1, 1));
         root3d.getChildren().add(world);
@@ -106,6 +125,15 @@ public final class MachineScene extends StackPane {
         tooltip.setManaged(false);
         tooltip.setVisible(false);
         labelOverlay.getChildren().add(tooltip);
+        for (int i = 0; i < 12; i++) {
+            Label badge = new Label();
+            badge.getStyleClass().add("parked-badge");
+            badge.setManaged(false);
+            badge.setMouseTransparent(true);
+            badge.setVisible(false);
+            parkedBadges.add(badge);
+            labelOverlay.getChildren().add(badge);
+        }
 
         initialiseMaterials();
         buildLights();
@@ -113,18 +141,42 @@ public final class MachineScene extends StackPane {
         buildPool();
         buildTrail();
 
-        HBox cameraButtons = buildCameraButtons();
-        Label shortcut = new Label("SPACE play/pause · ← → chapters · 1–4 cameras · drag to orbit · scroll to zoom");
+        cameraButtons = buildCameraButtons();
+        shortcut = new Label("SPACE pause · ← → chapters · P present · A auto · Q quality · H contrast · N notes");
         shortcut.getStyleClass().add("shortcut-hint");
         shortcut.setMouseTransparent(true);
+        diagnostics.getStyleClass().add("diagnostics-label");
+        diagnostics.setMouseTransparent(true);
 
-        getChildren().addAll(subScene, labelOverlay, cameraButtons, shortcut);
+        getChildren().addAll(subScene, labelOverlay, cameraButtons, shortcut, diagnostics, gcBinOverlay);
         StackPane.setAlignment(cameraButtons, Pos.TOP_RIGHT);
         StackPane.setMargin(cameraButtons, new Insets(14, 16, 0, 0));
         StackPane.setAlignment(shortcut, Pos.BOTTOM_RIGHT);
         StackPane.setMargin(shortcut, new Insets(0, 16, 16, 0));
+        StackPane.setAlignment(diagnostics, Pos.TOP_LEFT);
+        StackPane.setMargin(diagnostics, new Insets(16, 0, 0, 16));
+        StackPane.setAlignment(gcBinOverlay, Pos.BOTTOM_RIGHT);
+        StackPane.setMargin(gcBinOverlay, new Insets(0, 16, 48, 0));
 
         installPointerControls();
+    }
+
+    private VBox buildGcBinOverlay() {
+        Region lid = new Region();
+        lid.getStyleClass().add("gc-bin-lid");
+        StackPane body = new StackPane(new Label("GC"));
+        body.getStyleClass().add("gc-bin-body");
+        VBox icon = new VBox(2, lid, body);
+        icon.setAlignment(Pos.CENTER);
+        Label text = new Label("GC ELIGIBLE");
+        text.getStyleClass().add("gc-bin-label");
+        VBox box = new VBox(3, icon, text);
+        box.getStyleClass().add("gc-bin-overlay");
+        box.setAlignment(Pos.CENTER);
+        box.setMouseTransparent(true);
+        box.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
+        box.setAccessibleText("Reclamation bin. Terminated virtual threads become eligible for garbage collection here.");
+        return box;
     }
 
     private void initialiseMaterials() {
@@ -160,6 +212,7 @@ public final class MachineScene extends StackPane {
 
     private void buildStatics() {
         buildGrid();
+        buildGcBin();
         Group cpu = layer(150, 3.5, 64, 0, Color.web("#1c1508"), AMBER, 0);
         Group carriers = layer(150, 3.5, 56, 26, Color.web("#0a1626"), BLUE, 1);
         Group scheduler = layer(150, 3.5, 50, 52, Color.web("#150f2b"), PURPLE, 2);
@@ -192,10 +245,58 @@ public final class MachineScene extends StackPane {
         addProjectedLabel("CARRIER THREADS", "blue", -81, 33, 0, AnchorAlignment.RIGHT);
         addProjectedLabel("SCHEDULER · ForkJoinPool", "purple", -81, 59, 0, AnchorAlignment.RIGHT);
         addProjectedLabel("VIRTUAL THREADS · runnable", "green", -91, 85, 0, AnchorAlignment.RIGHT);
-        addProjectedLabel("CONTINUATION SNAPSHOTS · heap", "purple", 118, 74, 0, AnchorAlignment.CENTER);
+        heapLabel = addProjectedLabel("I/O WAIT · 0 VTs · PARKED STACK CHUNKS", "purple",
+                118, 74, 0, AnchorAlignment.CENTER);
         addProjectedLabel("APPLICATION TASKS ↓", "muted", -130, 112, 0, AnchorAlignment.CENTER);
-        Label completed = addProjectedLabel("COMPLETED →", "subtle", 140, -6, 40, AnchorAlignment.CENTER);
-        completed.setStyle("-fx-font-size: 9px;");
+    }
+
+    private void buildGcBin() {
+        Group bin = new Group();
+        bin.setTranslateX(155);
+        bin.setTranslateZ(90);
+        PhongMaterial frame = material(Color.web("#c4d3e3"));
+        PhongMaterial wall = transparentMaterial(Color.web("#60a5fa"), 0.26);
+        Box base = new Box(30, 1.6, 24);
+        base.setTranslateY(0);
+        base.setMaterial(material(Color.web("#172334")));
+        Box back = new Box(30, 18, 1.2);
+        back.setTranslateY(9);
+        back.setTranslateZ(11.5);
+        back.setMaterial(wall);
+        Box leftWall = new Box(1.2, 18, 24);
+        leftWall.setTranslateX(-14.5);
+        leftWall.setTranslateY(9);
+        leftWall.setMaterial(wall);
+        Box rightWall = new Box(1.2, 18, 24);
+        rightWall.setTranslateX(14.5);
+        rightWall.setTranslateY(9);
+        rightWall.setMaterial(wall);
+        bin.getChildren().addAll(base, back, leftWall, rightWall);
+        for (int sx : new int[] {-1, 1}) {
+            for (int sz : new int[] {-1, 1}) {
+                Cylinder post = new Cylinder(0.75, 18, 7);
+                post.setTranslateX(sx * 14.5);
+                post.setTranslateY(9);
+                post.setTranslateZ(sz * 11.5);
+                post.setMaterial(frame);
+                bin.getChildren().add(post);
+            }
+        }
+        for (int sz : new int[] {-1, 1}) {
+            Box rim = new Box(30, 1.0, 1.0);
+            rim.setTranslateY(18);
+            rim.setTranslateZ(sz * 11.5);
+            rim.setMaterial(frame);
+            bin.getChildren().add(rim);
+        }
+        for (int sx : new int[] {-1, 1}) {
+            Box rim = new Box(1.0, 1.0, 24);
+            rim.setTranslateX(sx * 14.5);
+            rim.setTranslateY(18);
+            rim.setMaterial(frame);
+            bin.getChildren().add(rim);
+        }
+        world.getChildren().add(bin);
     }
 
     private void buildGrid() {
@@ -308,9 +409,14 @@ public final class MachineScene extends StackPane {
             Sphere particle = new Sphere(1.9, 10);
             particle.setVisible(false);
             particle.setCullFace(CullFace.NONE);
+            Sphere ioMarker = new Sphere(0.62, 7);
+            ioMarker.setVisible(false);
+            ioMarker.setMouseTransparent(true);
+            ioMarker.setMaterial(materials.get(VtColor.PURPLE));
             particles.add(particle);
             glows.add(glow);
-            world.getChildren().addAll(glow, particle);
+            ioMarkers.add(ioMarker);
+            world.getChildren().addAll(glow, particle, ioMarker);
         }
     }
 
@@ -335,6 +441,7 @@ public final class MachineScene extends StackPane {
         for (CameraRig.Preset preset : CameraRig.Preset.values()) {
             Button button = new Button(preset.name());
             button.getStyleClass().add("camera-button");
+            button.setAccessibleText(preset.name().toLowerCase(Locale.ROOT) + " camera preset");
             button.setOnAction(event -> camera.toPreset(preset));
             bar.getChildren().add(button);
         }
@@ -377,6 +484,10 @@ public final class MachineScene extends StackPane {
             camera.zoom(event.getDeltaY());
             event.consume();
         });
+        subScene.addEventHandler(ZoomEvent.ZOOM, event -> {
+            camera.zoom(-Math.log(Math.max(0.01, event.getZoomFactor())) * 420);
+            event.consume();
+        });
         subScene.setOnMouseMoved(this::showTooltip);
     }
 
@@ -395,11 +506,16 @@ public final class MachineScene extends StackPane {
         int carrierIndex = vt.carrier() == null ? -1 : vt.carrier().index();
         int progress = vt.work0() == 0 ? 0 : (int) Math.round((1 - vt.work() / vt.work0()) * 100);
         progress = Math.max(0, Math.min(100, progress));
-        String text = "VT-" + vt.id() + " · " + vt.state().display()
+        String text = "VT-" + vt.id() + " · " + vt.profile().display() + " · " + vt.state().display()
                 + (carrierIndex >= 0 ? " on C" + (carrierIndex + 1) : "")
                 + (vt.state() == Sim.VtState.RUNNING ? " · " + progress + "% done" : "")
                 + (vt.state() == Sim.VtState.PARKED
-                        ? " · I/O " + String.format(Locale.ROOT, "%.1f", vt.io()) + "s" : "");
+                        ? vt.live() ? " · real I/O wait (planned "
+                                + String.format(Locale.ROOT, "%.1f", vt.plannedIoSeconds()) + "s)"
+                                : " · I/O " + String.format(Locale.ROOT, "%.1f", vt.io()) + "s left"
+                        : vt.profile() == Sim.TaskProfile.IO_BOUND
+                                ? " · I/O " + String.format(Locale.ROOT, "%.1f", vt.plannedIoSeconds()) + "s planned"
+                                : "");
         tooltip.setText(text);
         tooltip.autosize();
         tooltip.relocate(Math.min(getWidth() - tooltip.getWidth() - 4, event.getX() + 14),
@@ -417,6 +533,7 @@ public final class MachineScene extends StackPane {
         syncParticles();
         syncHero();
         camera.sync();
+        syncParkedBadges();
         projectLabels();
     }
 
@@ -424,7 +541,7 @@ public final class MachineScene extends StackPane {
         for (BootLayer layer : bootLayers) {
             double amount = clamp((sim.bootT() - layer.order * 0.5) / 0.5, 0, 1);
             layer.group.setTranslateY(layer.restY - (1 - amount) * 18);
-            if (layer.order == 4) heapGhost.setOpacity(amount);
+            if (layer.order == 4) heapGhost.setOpacity(amount * 0.22);
         }
     }
 
@@ -450,6 +567,7 @@ public final class MachineScene extends StackPane {
             if (index >= particles.size()) break;
             Sphere particle = particles.get(index);
             Sphere glow = glows.get(index);
+            Sphere ioMarker = ioMarkers.get(index);
             VtColor color = colorFor(vt);
             double scale = scaleFor(vt);
             setPosition(particle, vt.pos());
@@ -460,16 +578,29 @@ public final class MachineScene extends StackPane {
             glow.setScaleX(scale * 1.15);
             glow.setScaleY(scale * 1.15);
             glow.setScaleZ(scale * 1.15);
+            ioMarker.setTranslateX(vt.pos().x + 3.0 * scale);
+            ioMarker.setTranslateY(vt.pos().y + 2.3 * scale
+                    + Math.sin(sim.time() * 5 + vt.id()) * 0.7);
+            ioMarker.setTranslateZ(vt.pos().z);
             particle.setMaterial(materials.get(color));
             glow.setMaterial(glowMaterials.get(color));
             particle.setVisible(true);
-            glow.setVisible(true);
+            boolean detail = effectiveHighQuality();
+            boolean waiting = vt.state() == Sim.VtState.PARKING || vt.state() == Sim.VtState.PARKED;
+            boolean important = vt.hero() || waiting
+                    || vt.id() == highlightedId && System.nanoTime() < highlightUntil
+                    || vt.state() == Sim.VtState.RUNNING || vt.state() == Sim.VtState.MOUNTING
+                    || (vt.carrier() != null && vt.carrier().pinned());
+            glow.setVisible(detail || important);
+            boolean ioBound = vt.profile() == Sim.TaskProfile.IO_BOUND;
+            ioMarker.setVisible(ioBound && !waiting && (detail || important || index % 4 == 0));
             pickedVts.put(particle, vt);
             index++;
         }
         for (int i = index; i < particles.size(); i++) {
             particles.get(i).setVisible(false);
             glows.get(i).setVisible(false);
+            ioMarkers.get(i).setVisible(false);
         }
     }
 
@@ -487,10 +618,14 @@ public final class MachineScene extends StackPane {
         double scale = switch (vt.state()) {
             case RUNNING -> 1.5 + 0.12 * Math.sin(sim.time() * 7 + vt.id());
             case MOUNTING -> 1.5;
-            case PARKING, PARKED -> 0.9;
+            case PARKING, PARKED -> 1.15 + 0.08 * Math.sin(sim.time() * 5 + vt.id());
             default -> 1;
         };
-        return vt.hero() ? scale * 1.45 : scale;
+        if (vt.hero()) scale *= 1.45;
+        if (vt.id() == highlightedId && System.nanoTime() < highlightUntil) {
+            scale *= 1.85 + 0.12 * Math.sin(sim.time() * 12);
+        }
+        return scale;
     }
 
     private void syncHero() {
@@ -525,6 +660,34 @@ public final class MachineScene extends StackPane {
         heroLabel.setVisible(true);
     }
 
+    private void syncParkedBadges() {
+        int parked = 0;
+        int badgeIndex = 0;
+        for (Vt vt : sim.vts()) {
+            if (vt.state() != Sim.VtState.PARKED) continue;
+            parked++;
+            if (badgeIndex >= parkedBadges.size()) continue;
+            Label badge = parkedBadges.get(badgeIndex++);
+            Point3D scenePoint = world.localToScene(vt.pos().x, vt.pos().y + 3.6, vt.pos().z, true);
+            Point3D local = labelOverlay.sceneToLocal(scenePoint);
+            if (!Double.isFinite(local.getX()) || !Double.isFinite(local.getY())) {
+                badge.setVisible(false);
+                continue;
+            }
+            badge.setText("● VT-" + vt.id());
+            badge.setAccessibleText("Virtual thread " + vt.id() + " parked for I/O in the heap area");
+            badge.autosize();
+            badge.relocate(clamp(local.getX() - badge.getWidth() / 2, 3,
+                            Math.max(3, labelOverlay.getWidth() - badge.getWidth() - 3)),
+                    clamp(local.getY() - badge.getHeight(), 3,
+                            Math.max(3, labelOverlay.getHeight() - badge.getHeight() - 3)));
+            badge.setVisible(true);
+        }
+        for (int i = badgeIndex; i < parkedBadges.size(); i++) parkedBadges.get(i).setVisible(false);
+        heapLabel.setText("I/O WAIT · " + parked + " VT" + (parked == 1 ? "" : "s")
+                + " PARKED IN HEAP");
+    }
+
     private void projectLabels() {
         for (ProjectedLabel projection : projectedLabels) {
             Label label = projection.label;
@@ -537,9 +700,62 @@ public final class MachineScene extends StackPane {
             label.autosize();
             double x = projection.alignment == AnchorAlignment.RIGHT
                     ? local.getX() - label.getWidth() : local.getX() - label.getWidth() / 2;
-            label.relocate(x, local.getY() - label.getHeight() / 2);
+            double clampedX = clamp(x, 3, Math.max(3, labelOverlay.getWidth() - label.getWidth() - 3));
+            double clampedY = clamp(local.getY() - label.getHeight() / 2, 3,
+                    Math.max(3, labelOverlay.getHeight() - label.getHeight() - 3));
+            label.relocate(clampedX, clampedY);
         }
     }
+
+    /** Supplies measured renderer performance and drives AUTO quality hysteresis. */
+    public void setPerformance(double fps, double frameMillis) {
+        if (requestedQuality == Quality.AUTO) {
+            if (!autoLow && (fps < 48 || frameMillis > 22 || sim.vts().size() > 320)) autoLow = true;
+            else if (autoLow && fps > 56 && frameMillis < 18 && sim.vts().size() < 260) autoLow = false;
+        }
+        diagnostics.setText("%.0f FPS · %.1f ms · %s".formatted(fps, frameMillis, qualityLabel()));
+    }
+
+    public String cycleQuality() {
+        requestedQuality = switch (requestedQuality) {
+            case AUTO -> Quality.HIGH;
+            case HIGH -> Quality.LOW;
+            case LOW -> Quality.AUTO;
+        };
+        return qualityLabel();
+    }
+
+    public String qualityLabel() {
+        return requestedQuality == Quality.AUTO ? "AUTO/" + (autoLow ? "LOW" : "HIGH") : requestedQuality.name();
+    }
+
+    private boolean effectiveHighQuality() {
+        return requestedQuality == Quality.HIGH || requestedQuality == Quality.AUTO && !autoLow;
+    }
+
+    public void highlightVt(long id) {
+        highlightedId = id;
+        highlightUntil = System.nanoTime() + 5_000_000_000L;
+        tooltip.setVisible(false);
+    }
+
+    public void setPresenterMode(boolean presenter) {
+        cameraButtons.setVisible(!presenter);
+        cameraButtons.setManaged(!presenter);
+        shortcut.setVisible(!presenter);
+        shortcut.setManaged(!presenter);
+    }
+
+    public void setHighContrast(boolean enabled) {
+        highContrast = enabled;
+        getStyleClass().remove("high-contrast-machine");
+        if (enabled) getStyleClass().add("high-contrast-machine");
+        subScene.setFill(Color.web(enabled ? "#000000" : "#070b12"));
+        setStyle("-fx-background-color: " + (enabled ? "#000000" : "#070b12") + ";");
+        if (enabled) autoLow = true;
+    }
+
+    public boolean highContrast() { return highContrast; }
 
     public void cameraPreset(CameraRig.Preset preset) {
         camera.toPreset(preset);

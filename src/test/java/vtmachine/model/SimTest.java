@@ -3,8 +3,11 @@ package vtmachine.model;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.SplittableRandom;
 
 import org.junit.jupiter.api.Test;
 
@@ -32,7 +35,7 @@ class SimTest {
         assertTrue(sim.forcePark());
         assertEquals(mountedBefore - 1, sim.stats().mounted());
         assertEquals(1, sim.stats().parked());
-        assertTrue(sim.log().peekFirst().contains("parked · carrier released"));
+        assertTrue(sim.log().peekFirst().contains("I/O wait · carrier released"));
     }
 
     @Test
@@ -95,6 +98,81 @@ class SimTest {
         assertEquals(2.25, sim.speed());
         assertEquals(0, sim.chapter());
         assertEquals(0, sim.vts().size());
+    }
+
+    @Test
+    void tenCarrierLanesFitTheMachineAndMixedTasksGetRandomDurations() {
+        Sim sim = new Sim(10, 100, 1.4, 4242);
+        assertEquals(10, sim.carriers().size());
+        assertEquals(-65, sim.laneX(0), 1e-9);
+        assertEquals(65, sim.laneX(9), 1e-9);
+
+        advance(sim, 3.1);
+        sim.gotoChapter(5);
+        advance(sim, 0.4);
+        Sim.ProfileStats mix = sim.profileStats();
+        assertTrue(mix.fast() > 0);
+        assertTrue(mix.compute() > 0);
+        assertTrue(mix.ioBound() > 0);
+        assertEquals(sim.vts().size(), mix.fast() + mix.compute() + mix.ioBound());
+        assertTrue(sim.vts().stream().filter(vt -> vt.profile() == Sim.TaskProfile.IO_BOUND)
+                .allMatch(vt -> vt.plannedIoSeconds() >= 1 && vt.plannedIoSeconds() <= 8));
+
+        advance(sim, 12);
+        assertTrue(sim.averageIoSeconds() > 0, "I/O-bound tasks should visibly park and resume");
+    }
+
+    @Test
+    void invariantsHoldAcrossASeededActionStorm() {
+        Sim sim = new Sim(6, 200, 5.5, 0x5eed);
+        SplittableRandom actions = new SplittableRandom(99);
+        advance(sim, 3.2);
+        sim.setFreeRun(true);
+        for (int step = 0; step < 18_000; step++) {
+            if (step % 73 == 0) {
+                switch (actions.nextInt(6)) {
+                    case 0 -> sim.burst(actions.nextInt(1, 40));
+                    case 1 -> sim.forcePark();
+                    case 2 -> sim.forcePin();
+                    case 3 -> sim.setSpeed(actions.nextDouble(0.25, 3.0));
+                    case 4 -> sim.setFreeRun(actions.nextBoolean());
+                    default -> sim.gotoChapter(actions.nextInt(1, 6));
+                }
+            }
+            sim.tick(STEP);
+            assertTrue(sim.invariantViolations().isEmpty(), () -> String.join("; ", sim.invariantViolations()));
+        }
+    }
+
+    @Test
+    void deterministicScenarioKeepsItsGoldenEventVocabulary() {
+        Sim sim = new Sim(4, 80, 1.4, 42);
+        StringBuilder witnessed = new StringBuilder();
+        advance(sim, 4.5);
+        witnessed.append(String.join("\n", sim.log())).append('\n');
+        assertTrue(sim.forcePark());
+        witnessed.append(sim.log().peekFirst()).append('\n');
+        advance(sim, 1.0);
+        assertTrue(sim.forcePin());
+        witnessed.append(sim.log().peekFirst()).append('\n');
+        advance(sim, 5.0);
+
+        String log = witnessed.append(String.join("\n", sim.log())).toString();
+        for (String expected : List.of("scheduler online", "mounted on C", "I/O wait · carrier released",
+                "PINNED on C", "unpinned · resumes")) {
+            assertTrue(log.contains(expected), () -> "Missing golden event: " + expected + "\n" + log);
+        }
+    }
+
+    @Test
+    void scaleWorkloadStaysWithinAReasonableModelBudget() {
+        assertTimeout(Duration.ofSeconds(3), () -> {
+            Sim sim = new Sim(4, 800, 6.0, 77);
+            advance(sim, 3.1);
+            sim.gotoChapter(5);
+            advance(sim, 45);
+            assertTrue(sim.invariantViolations().isEmpty());
+        });
     }
 
     private static Sim runningMachine(long seed) {

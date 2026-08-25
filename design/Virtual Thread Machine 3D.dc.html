@@ -53,7 +53,7 @@ input[type=range]{accent-color:#34d399}
     <div style="flex:1;position:relative;min-width:0">
       <div ref="{{ mountRef }}" style="position:absolute;inset:0;cursor:grab"></div>
       <div ref="{{ tipRef }}" style="position:absolute;display:none;pointer-events:none;background:rgba(10,16,25,.92);border:1px solid #2a3b52;border-radius:6px;padding:5px 9px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#cfe0f2;white-space:nowrap;z-index:5"></div>
-      <div style="position:absolute;right:16px;bottom:16px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5c7089;letter-spacing:.06em">SPACE play/pause · ← → chapters · 1–4 cameras · drag to orbit · scroll to zoom</div>
+      <div style="position:absolute;right:16px;bottom:16px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5c7089;letter-spacing:.06em">SPACE play/pause · ← → chapters · 1–4 cameras · drag to orbit · scroll/pinch to zoom</div>
       <div style="position:absolute;left:16px;bottom:16px;width:400px;background:rgba(10,16,25,.88);border:1px solid #1d2b3c;border-radius:12px;padding:14px 16px;backdrop-filter:blur(6px)" data-screen-label="Narration">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
           <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#7d8fa3">CHAPTER {{ chapNum }}/6</div>
@@ -102,7 +102,7 @@ input[type=range]{accent-color:#34d399}
         <div style="position:relative;border:1px solid #1a2735;border-radius:8px;padding:8px 11px;background:#0d1520">
           <div style="position:absolute;inset:0;border-radius:8px;background:rgba(248,113,113,.18);opacity:{{ fPin }};transition:opacity .35s"></div>
           <div style="font-size:14px;font-weight:500;color:#f87171">4 · Pinned</div>
-          <div style="font-size:12px;color:#8ea2b8">Blocking in synchronized/native code pins the carrier — it can't be released.</div>
+          <div style="font-size:12px;color:#8ea2b8">Blocking with a native/foreign frame can pin the carrier; synchronized alone does not on Java 25.</div>
         </div>
       </div>
       <div style="flex:1;min-height:0;display:flex;flex-direction:column">
@@ -128,17 +128,17 @@ input[type=range]{accent-color:#34d399}
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;carriers&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:4,&quot;min&quot;:2,&quot;max&quot;:6,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;},&quot;maxThreads&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:500,&quot;min&quot;:50,&quot;max&quot;:800,&quot;step&quot;:50,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;},&quot;taskRate&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1.4,&quot;min&quot;:0.3,&quot;max&quot;:6,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;tasks/s&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;carriers&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:4,&quot;min&quot;:2,&quot;max&quot;:10,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;},&quot;maxThreads&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:500,&quot;min&quot;:50,&quot;max&quot;:800,&quot;step&quot;:50,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;},&quot;taskRate&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1.4,&quot;min&quot;:0.3,&quot;max&quot;:6,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;tasks/s&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;}}">
 class Component extends DCLogic {
   state = { stats:{runnable:0,mounted:0,parked:0,completed:0}, feed:['— boot sequence initiated —'], fMount:0,fPark:0,fResume:0,fPin:0,
     statusText:'BOOTING', playLabel:'Pause', speedLabel:'0.75×', chap:0, mode:'guided' };
   CHAPTERS = [
     {t:'BOOT', c:'#f5b84c', n:'Power on. Four OS threads light up on the CPU cores; the JVM starts a matching pool of carrier (platform) threads, and the ForkJoinPool scheduler spins up above them. This small machine is all the OS ever sees.'},
-    {t:'MOUNT', c:'#60a5fa', n:'Application tasks arrive and become virtual threads — cheap, JVM-managed objects on the runnable deck. The scheduler mounts each runnable VT onto a free carrier; only while mounted does a VT consume an OS thread.'},
-    {t:'PARK', c:'#a78bfa', n:'A VT hits blocking I/O. Instead of blocking its OS thread, it unmounts: its stack and continuation are copied to the heap tower, and the carrier is instantly free to run another VT.'},
+    {t:'MOUNT', c:'#60a5fa', n:'Application tasks arrive with varied runtimes: some finish quickly, some compute longer, and marked tasks will perform I/O. Only while mounted does a VT consume an OS thread.'},
+    {t:'PARK', c:'#a78bfa', n:'An I/O-bound VT reaches its randomized wait. It turns purple and moves to the heap area while its stack chunks remain with the virtual thread. Its carrier is instantly free.'},
     {t:'RESUME', c:'#34d399', n:'The I/O completes. The stored continuation makes the VT runnable again and it remounts on ANY free carrier — not necessarily the one it left. Watch it land on a different slot.'},
-    {t:'PINNED', c:'#f87171', n:'The failure mode: blocking inside a synchronized block or native call pins the VT to its carrier. The slot locks red — that carrier cannot be released until the pin ends. This is the one case that still wastes an OS thread.'},
-    {t:'SCALE', c:'#e6edf3', n:'The payoff. 500 virtual threads flood in and the machine does not grow: 4 carriers multiplex all of them, parked threads costing only heap memory. Thousands of concurrent tasks, a handful of OS threads.'}];
+    {t:'PINNED', c:'#f87171', n:'A remaining failure mode on Java 25: blocking while a native or foreign-function frame prevents unmounting pins the VT to its carrier. The slot locks red until the pin ends. Ordinary synchronized code no longer pins.'},
+    {t:'SCALE', c:'#e6edf3', n:'The payoff. 500 mixed-duration tasks flood in and a fixed set of illustrative lanes multiplexes fast, compute-heavy, and I/O-bound virtual threads.'}];
   renderVals(){
     this.mountRef = this.mountRef || React.createRef();
     this.tipRef = this.tipRef || React.createRef();
@@ -170,14 +170,14 @@ class Component extends DCLogic {
     if(i===3){ const p=s.vts.find(v=>v.state==='parked'); if(p) p.io=Math.min(p.io,0.8); else { s.burst+=2; s.pendingPark=true; } this.camTo('carriers'); this.log('chapter: resume'); }
     if(i===4){ if(!s.vts.some(v=>v.state==='running')) s.burst+=4; s.pendingPin=true; this.camTo('carriers'); this.log('chapter: pinned'); }
     if(i===5){ s.burst+=(this.props.maxThreads??500)-s.vts.length; s.chaos=true; this.camTo('overview'); this.log('chapter: scale — flooding tasks'); } }
-  resetSim(){ const C=Math.max(2,Math.min(6,this.props.carriers??4));
+  resetSim(){ const C=Math.max(2,Math.min(10,this.props.carriers??4));
     this.sim=Object.assign(this.sim||{},{ t:0, boot:0, running:true, speed:this.sim?this.sim.speed:0.75, hero:null, vts:[], queue:[], nextId:1, spawnAcc:0, burst:0, completed:0,
       spawnRate:0, chaos:false, mode:'guided', pendingPark:false, pendingPin:false,
       flash:{mount:-9,park:-9,resume:-9,pin:-9}, feed:['boot: power on'],
       carriers:Array.from({length:C},()=>({vt:null,pinT:0,heat:0})) });
     this.setState({statusText:'BOOTING'}); }
   // ---- geometry helpers (world coords, y up) ----
-  laneX(i){ const C=this.sim.carriers.length; return (i-(C-1)/2)*26; }
+  laneX(i){ const C=this.sim.carriers.length; return (i-(C-1)/2)*Math.min(26,130/Math.max(1,C-1)); }
   queueSlot(i){ const a=i*0.55, r=7+2.6*Math.sqrt(i); return {x:Math.cos(a)*r*1.7, y:80.5, z:Math.sin(a)*r*0.62}; }
   storeSlot(i){ const l=Math.floor(i/25), j=i%25; return {x:118+(j%5-2)*6.4, y:34+l*6.4, z:(Math.floor(j/5)-2)*6.4}; }
   animTo(vt,to,dur,done){ vt.anim={from:{...vt.pos},to,t:0,dur,done,arc:8+Math.random()*10}; }
@@ -190,7 +190,7 @@ class Component extends DCLogic {
   park(vt){ const s=this.sim; vt.carrier.vt=null; vt.carrier=null; vt.state='parking'; vt.io=1.8+Math.random()*3;
     const n=s.vts.filter(v=>v.state==='parked'||v.state==='parking').length;
     this.animTo(vt,this.storeSlot(n),0.85,()=>{vt.state='parked';});
-    this.flash('park'); this.log('VT-'+vt.id+' parked · carrier released'); }
+    this.flash('park'); this.log('VT-'+vt.id+' I/O wait · carrier released'); }
   pin(vt){ vt.carrier.pinT=2.6+Math.random()*1.2; this.flash('pin'); this.log('VT-'+vt.id+' PINNED on C'+(this.sim.carriers.indexOf(vt.carrier)+1)); }
   tick(dt){ const s=this.sim, cap=this.props.maxThreads??500;
     s.spawnAcc+=s.spawnRate*dt; let n=0;
@@ -255,7 +255,7 @@ class Component extends DCLogic {
     this.layers.push(slab(170,66,78,0x0a2018,0x34d399,'VIRTUAL THREADS · runnable')); // 3
     // heap tower base
     const heap=slab(40,40,30,0x171129,0xa78bfa,null); heap.position.x=118; this.layers.push(heap);
-    const hl=this.textSprite('CONTINUATION SNAPSHOTS · heap',0xa78bfa); hl.position.set(118,74,0); scene.add(hl); this.heapLabel=hl;
+    const hl=this.textSprite('I/O WAIT · PARKED STACK CHUNKS · heap',0xa78bfa); hl.position.set(118,74,0); scene.add(hl); this.heapLabel=hl;
     const heapCol=new T.Mesh(new T.BoxGeometry(36,44,36), new T.MeshLambertMaterial({color:0xa78bfa,transparent:true,opacity:0.07}));
     heapCol.position.set(118,54,0); scene.add(heapCol); this.layers.push({position:heapCol.position,_m:heapCol});
     // per-lane cores + slots

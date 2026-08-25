@@ -7,6 +7,7 @@
     <groupId>ca.bazlur</groupId>
     <artifactId>virtual-thread-simulation</artifactId>
     <version>1.0-SNAPSHOT</version>
+    <name>Virtual Thread Machine</name>
 
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
@@ -57,5 +58,60 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>native-image</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-dependency-plugin</artifactId>
+                        <version>3.8.1</version>
+                        <executions>
+                            <execution>
+                                <id>copy-runtime-modules</id>
+                                <phase>prepare-package</phase>
+                                <goals><goal>copy-dependencies</goal></goals>
+                                <configuration>
+                                    <includeScope>runtime</includeScope>
+                                    <outputDirectory>${project.build.directory}/jpackage-modules</outputDirectory>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <executions>
+                            <execution>
+                                <id>jpackage-app-image</id>
+                                <phase>package</phase>
+                                <goals><goal>run</goal></goals>
+                                <configuration>
+                                    <target>
+                                        <delete dir="${project.build.directory}/dist/Virtual Thread Machine.app" quiet="true" />
+                                        <delete dir="${project.build.directory}/dist/Virtual Thread Machine" quiet="true" />
+                                        <mkdir dir="${project.build.directory}/dist" />
+                                        <exec executable="${java.home}/bin/jpackage" failonerror="true">
+                                            <arg value="--type"/><arg value="app-image"/>
+                                            <arg value="--name"/><arg value="Virtual Thread Machine"/>
+                                            <arg value="--dest"/><arg value="${project.build.directory}/dist"/>
+                                            <arg value="--app-version"/><arg value="1.0.0"/>
+                                            <arg value="--module-path"/>
+                                            <arg value="${project.build.outputDirectory}${path.separator}${project.build.directory}/jpackage-modules"/>
+                                            <arg value="--module"/><arg value="vtmachine/vtmachine.App"/>
+                                            <arg value="--java-options"/><arg value="--enable-native-access=javafx.graphics"/>
+                                        </exec>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

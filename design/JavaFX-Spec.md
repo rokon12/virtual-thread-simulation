@@ -30,14 +30,15 @@ World units are abstract; keep the numbers below verbatim. **IMPORTANT:** the HT
 | Layer 2 · Scheduler slab | Box 150×3.5×50 @ y=52 | fill #150f2b, edge #a78bfa; rotating torus r=14 tube=0.9 @ y=56, spin 1.5 rad/s |
 | Layer 3 · Runnable deck | Box 170×3.5×66 @ y=78 | fill #0a2018, edge #34d399 |
 | Heap tower | Box 40×3.5×40 @ (118,30,0); ghost column Box 36×44×36 @ (118,54,0), opacity .07 | edge #a78bfa; parked VTs stack above |
-| Core i (i=0..C−1) | Box 12×8×12 @ (laneX(i), 6, 0) | laneX(i) = (i−(C−1)/2)·26 ; C=4 default, clamp 2–6 |
+| Core i (i=0..C−1) | Box 12×8×12 @ (laneX(i), 6, 0) | laneX(i) = (i−(C−1)/2)·min(26,130/(C−1)); C=4 default, clamp 2–10 |
 | Carrier slot i | Torus r=6 tube=0.7 @ (laneX(i), 28.4, 0), flat | idle #24425f · occupied #60a5fa · pinned #f87171 + pulse scale ±8% @ 8 rad/s |
 | Lane pillar i | Cylinder r=0.5 h=26 @ (laneX(i), 15, 0) | #60a5fa @ 18% opacity |
 | VT particle | Sphere r=1.9 (pool of maxThreads+40) | plus glow shell Sphere r=3.6, opacity .22 (see §5) |
 | Mount position | (laneX(i), 30, 0) | running VT sits here; pulse scale 1.5±0.12 @ 7 rad/s |
 | Queue slot i | spiral: a=0.55i, r=7+2.6√i → (cos a·1.7r, 80.5, sin a·0.62r) | elliptical spiral fills the deck to 500 |
 | Heap slot i | x=118+((i%25)%5−2)·6.4, y=34+⌊i/25⌋·6.4, z=(⌊(i%25)/5⌋−2)·6.4 | 5×5 per level, stacks upward |
-| Task inlet / exit | spawn (−130±10, 105+rnd·12, ±10) · exit (150, −14, 40) | labels "APPLICATION TASKS ↓" / "COMPLETED →" |
+| Task inlet / exit | spawn (−130±10, 105+rnd·12, ±10) · reclamation target (155, 10, 90) | labels "APPLICATION TASKS ↓" / "GC-ELIGIBLE BIN" |
+| Reclamation bin | open 30×18×24 bin centered near (155,9,90) | completed VTs turn white, fly inside, then disappear; eligibility wording does not claim an immediate GC cycle |
 
 ### Color palette
 
@@ -88,7 +89,7 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 | Region | Spec |
 |---|---|
 | Header | Pulsing green LED (1.6 s), title, GUIDED/FREE RUN toggle (ToggleGroup), status text BOOTING/RUNNING/PAUSED |
-| Right sidebar 290px | Counters grid 2×2 (RUNNABLE green, MOUNTED blue, PARKED purple, COMPLETED white) · 4 key-behavior cards whose backgrounds flash on event · event log, 9 mono lines "047s VT-12 parked · carrier released" |
+| Right sidebar 290px | Counters include RUNNABLE, MOUNTED, PARKED, COMPLETED, live total, and utilization · task-profile mix · throughput graph · 4 behavior cards · event log, 7 clickable mono lines |
 | Narration card | Bottom-left 400px overlay: CHAPTER n/6, colored title, body text, ←/Next buttons. Chapter copy: §10 verbatim |
 | Bottom bar | Pause/Run · +25 tasks · Force park · Force pin · speed Slider + readout "0.75×" |
 | Keyboard | SPACE play/pause · ←/→ chapters · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480) |
@@ -188,7 +189,7 @@ try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
 // jdk.internal tracking or JFR jdk.VirtualThreadPinned events for §PINNED
 ```
 
-Virtual threads are final since Java 21 — no preview flags on 25. For the PINNED chapter with real threads, trigger it honestly: `synchronized (lock) { Thread.sleep(...); }` on Java ≤23 pins; on 24+ (JEP 491) synchronized no longer pins, so demo pinning via a native call or `Object.wait()` inside a monitor — worth saying out loud in the talk.
+Virtual threads are final since Java 21 — no preview flags on 25. For the PINNED chapter with real threads, trigger it honestly: `synchronized (lock) { Thread.sleep(...); }` pins only on Java ≤23. Since Java 24 (JEP 491), `synchronized`, monitor entry, and `Object.wait()` can all unmount normally. A Java 25 pin requires a native or foreign-function frame on the stack (for example, native code calling back into blocking Java code). The synthetic PINNED chapter represents that remaining case and must say so explicitly.
 
 ## 7 · Project Setup
 
@@ -238,7 +239,9 @@ public final class Sim {
 ```
 1  BOOT      if bootT < 3: bootT += dt; if crossed 3 → log("scheduler online"), gotoChapter(2); return
 2  SPAWN     spawnAcc += rate*dt; while (spawnAcc≥1 || burst>0) && vts < cap && n<6: spawn()
-             spawn(): pos = inlet ± jitter; work = work0 = 1.6+rnd*2.8;
+             spawn(): choose FAST (36%), COMPUTE (32%), or IO_BOUND (32%);
+                      work = 0.45–1.5 / 2.2–7.0 / 0.8–2.6 s respectively;
+                      IO_BOUND gets a 1–8 s planned wait and a randomized work trigger;
                       if hero==null → hero=this; tween to queueSlot(queue.size), 0.7s; queue.add
 3  TWEENS    for each vt with active tween: t += dt/dur; e = t²(3−2t);
              pos = lerp(from,to,e); pos.y += sin(πe)*arc; if t≥1 → fire onArrive
@@ -252,14 +255,15 @@ public final class Sim {
              pendingPin?  → pin(vt) and clear flag          // guided chapter 5
              carrier pinned? → skip (work frozen)
              work −= dt
+             IO_BOUND && !resumed && work≤ioTrigger → park(vt)
              chaos && work>0.4:  r=rnd();  !resumed && r<0.30dt → park(vt)
                                             r>1−0.03dt → pin(vt)
              work≤0 → free carrier; DONE; tween to exit 0.8s → DEAD; completed++
 7  PARKED    io −= dt; io≤0 → resumed=true; queue.addFirst; tween to queueSlot(0) 0.85s; flash(RESUME)
 8  REAP      remove DEAD (return spheres to pool); hero dead → hero=null
 
-park(vt): free carrier; PARKING; io=1.8+rnd*3; tween to heapSlot(parkedCount) 0.85s
-          → PARKED; flash(PARK); log("VT-n parked · carrier released")
+park(vt): free carrier; PARKING; io=planned 1–8 s (or a random demo wait); tween to heapSlot 0.85s
+          → PARKED; flash(PARK); log("VT-n I/O wait · carrier released")
 pin(vt):  carrier.pinT = 2.6+rnd*1.2; flash(PIN); log("VT-n PINNED on Cn")
 ```
 
@@ -299,18 +303,18 @@ Threading rule: everything above runs on the FX Application Thread. The only cro
 | Chapter | Narration text (use verbatim) |
 |---|---|
 | 1 BOOT | Power on. Four OS threads light up on the CPU cores; the JVM starts a matching pool of carrier (platform) threads, and the ForkJoinPool scheduler spins up above them. This small machine is all the OS ever sees. |
-| 2 MOUNT | Application tasks arrive and become virtual threads — cheap, JVM-managed objects on the runnable deck. The scheduler mounts each runnable VT onto a free carrier; only while mounted does a VT consume an OS thread. |
-| 3 PARK | A VT hits blocking I/O. Instead of blocking its OS thread, it unmounts: its stack and continuation are copied to the heap tower, and the carrier is instantly free to run another VT. |
+| 2 MOUNT | Application tasks arrive with varied runtimes: some finish quickly, some compute longer, and dotted-satellite tasks will perform I/O. The scheduler mounts each runnable VT onto a free carrier; only while mounted does a VT consume an OS thread. |
+| 3 PARK | An I/O-bound VT reaches its randomized wait. It turns purple and flies to the heap area while its stack chunks remain with the virtual thread. Its carrier is instantly free to run another VT. |
 | 4 RESUME | The I/O completes. The stored continuation makes the VT runnable again and it remounts on ANY free carrier — not necessarily the one it left. Watch it land on a different slot. |
-| 5 PINNED | The failure mode: blocking inside a synchronized block or native call pins the VT to its carrier. The slot locks red — that carrier cannot be released until the pin ends. This is the one case that still wastes an OS thread. |
-| 6 SCALE | The payoff. 500 virtual threads flood in and the machine does not grow: 4 carriers multiplex all of them, parked threads costing only heap memory. Thousands of concurrent tasks, a handful of OS threads. |
+| 5 PINNED | A remaining failure mode on Java 25: blocking while a native or foreign-function frame prevents unmounting pins the VT to its carrier. The slot locks red until the pin ends. Ordinary synchronized code no longer pins. |
+| 6 SCALE | The payoff. 500 mixed-duration tasks flood in and the machine does not grow: a fixed set of illustrative carrier lanes multiplexes fast, compute-heavy, and I/O-bound virtual threads, while parked waits retain lightweight heap-backed state. |
 
 | Legend card | Body text |
 |---|---|
 | 1 · Mount | Runnable VT mounts on a free carrier thread. |
 | 2 · Park | Blocking I/O unmounts the VT; continuation stored on the heap, carrier released. |
 | 3 · Resume | I/O done; VT remounts on any free carrier. |
-| 4 · Pinned | Blocking in synchronized/native code pins the carrier — it can't be released. |
+| 4 · Pinned | Blocking with a native/foreign frame can pin the carrier; synchronized alone does not on Java 25. |
 
 ## 11 · Performance Budget + Acceptance Checklist
 
@@ -370,6 +374,7 @@ Camera goal lerp (every frame while a goal exists): `o.θ += (g.θ−o.θ)·0.06
 | Drag | θ −= Δx·0.005 ; φ = clamp(φ − Δy·0.004, 0.15, 1.45) |
 | Release / exit | end drag; cursor OPEN_HAND |
 | Scroll | dist = clamp(dist + Δy·0.4, 80, 480); clear goal |
+| Pinch gesture | `ZoomEvent.ZOOM`: dist += −ln(zoomFactor)·420; clamp 80–480; clear goal |
 | Mouse move (not dragging) | pick → tooltip (§14); recheck every 3rd frame is fine |
 | SPACE | toggle running; playLabel "Pause"↔"Run"; status RUNNING↔PAUSED. Ignore when focus is in a text input |
 | ← / → | gotoChapter(current ∓/± 1) — wraps modulo 6 |
@@ -389,7 +394,7 @@ Global: window bg `#070b12`; UI font Space Grotesk; data font IBM Plex Mono; all
 | Event log | header 11px letter-spacing .16em #7d8fa3 "EVENT LOG"; lines mono 10.5px lh 1.75 #9db2c8, ellipsis-truncated, newest first, max 9 |
 | Narration card | 400px wide, bottom-left inset 16; bg rgba(10,16,25,.88), border #1d2b3c, radius 12, padding 14 16, blur backdrop if cheap. Row: "CHAPTER n/6" mono 12px #7d8fa3 · title 17px/700 in chapter color · spacer · ← button 30×26 (bg #0e1826, border #26364a, fg #9db2c8) · "Next →" button h26 padding 0 12 (bg #0f2b21, border #2a5c48, fg #6ee7b7). Body 14px lh 1.55 #b6c6d8 |
 | Camera preset buttons | top-right inset 16/14, gap 6; mono 10px, padding 5 10, radius 6, bg rgba(14,24,38,.8), border #26364a, fg #9db2c8; labels OVERVIEW CARRIERS HEAP TOP |
-| Shortcut hint | bottom-right inset 16; mono 10px #5c7089 letter-spacing .06em: "SPACE play/pause · ← → chapters · 1–4 cameras · drag to orbit · scroll to zoom" |
+| Shortcut hint | bottom-right inset 16; mono 10px #5c7089; include presenter, quality, contrast, notes, and camera shortcuts. Drag orbits; scrolling and pinch gestures zoom. |
 | Bottom bar | padding 10 22, top border. Pause/Run: 13px/500, padding 8 18, radius 8, width 90, green set (bg #0f2b21/border #2a5c48/fg #6ee7b7). "+25 tasks": blue set (#0f1e30/#24425f/#93c5fd). "Force park": purple set (#191531/#3d3564/#c4b5fd). "Force pin": red set (#2b0f0f/#5c2a2a/#fca5a5). Right: "SPEED" mono 12px #7d8fa3 · slider w130 accent #34d399, range 0.25–3 step 0.25 default 0.75 · readout mono 12px #e6edf3 w44 "0.75×" (format %.2f×) |
 | Hover tooltip | bg rgba(10,16,25,.92), border #2a3b52, radius 6, padding 5 9, mono 12px #cfe0f2, no wrap, offset cursor +14/+10 |
 
@@ -403,11 +408,11 @@ Log line format: `%03ds %s` where the integer is floor(sim.t). Every message the
 | boot completes (t≥3) | `scheduler online` |
 | mount (fresh) | `VT-{id} mounted on C{n}` |
 | mount (after park) | `VT-{id} resumed on C{n}` |
-| park | `VT-{id} parked · carrier released` |
+| park | `VT-{id} I/O wait · carrier released` |
 | I/O completes | `VT-{id} I/O done · runnable` |
 | pin | `VT-{id} PINNED on C{n}` |
 | pin expires | `VT-{id} unpinned · resumes` |
-| complete | `VT-{id} completed · C{n} free` |
+| complete | `VT-{id} completed · C{n} free · GC eligible` |
 | burst button | `burst: 25 tasks submitted` |
 | force park, none eligible | `no unpinned running VT` |
 | force pin, none eligible | `no running VT` |
@@ -460,11 +465,11 @@ Rendering: each label is a canvas-drawn texture `600 {px}px IBM Plex Mono` on tr
 | CARRIER THREADS | #60a5fa | (−81, 33, 0) | 28 | right-middle |
 | SCHEDULER · ForkJoinPool | #a78bfa | (−81, 59, 0) | 28 | right-middle |
 | VIRTUAL THREADS · runnable | #34d399 | (−91, 85, 0) | 28 | right-middle |
-| CONTINUATION SNAPSHOTS · heap | #a78bfa | (118, 74, 0) | 28 | center |
+| I/O WAIT · {n} VTs · PARKED STACK CHUNKS | #a78bfa | (118, 74, 0) | 28 | center; live count plus up to 12 projected VT-id badges |
 | C1…Cn | #8ea2b8 | (laneX(i), 22, 16) | 24 | center |
 | PINNED (per lane, hidden unless pinned) | #f87171 | (laneX(i), 40, 0) | 28 | center |
 | APPLICATION TASKS ↓ | #7d8fa3 | (−130, 112, 0) | 28 | center |
-| COMPLETED → | #5c7089 | (140, −6, 40) | 18 | center |
+| GC ELIGIBLE bin overlay | #c4d3e3 | screen bottom-right above shortcuts | fixed 2D destination marker; accessible description clarifies collection is not immediate |
 | VT-{heroId} (follows hero) | #6ee7b7 | hero.pos + (0, 8, 0) | 24 | center |
 
 Hero trail: 36-point ring buffer, seeded at (0,−999,0) (off-scene) so it doesn't streak on first frames; per-vertex color ramp from black to rgb(0.43, 0.91, 0.72) (= #6ee7b7) tail→head; line opacity 0.9.
@@ -477,7 +482,7 @@ Exposed settings (a Preferences dialog or CLI flags):
 
 | Param | Range | Default | Applied |
 |---|---|---|---|
-| carriers | 2–6 | 4 | on reset only (scene lanes are built once) |
+| carriers | 2–10 | 4 | on reset only (lane spacing contracts above 6) |
 | maxThreads | 50–800 | 500 | live (spawn cap; pool sized at max+40) |
 | taskRate | 0.3–6.0 /s | 1.4 | live (free-run spawn rate) |
 | seed | any long | random | on reset |

@@ -61,7 +61,7 @@ input[type=range]{accent-color:#34d399}
         <div style="position:relative;border:1px solid #1c2938;border-radius:8px;padding:9px 11px;background:#0f1722">
           <div style="position:absolute;inset:0;border-radius:8px;background:rgba(248,113,113,.18);opacity:{{ fPin }};transition:opacity .35s"></div>
           <div style="font-size:13px;font-weight:500;color:#f87171">4 · Pinned</div>
-          <div style="font-size:11px;color:#8ea2b8">Blocking inside synchronized/native code pins the carrier — it cannot be released.</div>
+          <div style="font-size:11px;color:#8ea2b8">Blocking with a native/foreign frame can pin the carrier; synchronized alone does not on Java 25.</div>
         </div>
       </div>
       <div style="flex:1;min-height:0;display:flex;flex-direction:column">
@@ -87,7 +87,7 @@ input[type=range]{accent-color:#34d399}
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;carriers&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:4,&quot;min&quot;:2,&quot;max&quot;:6,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;},&quot;taskRate&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1.5,&quot;min&quot;:0.3,&quot;max&quot;:4,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;tasks/s&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;},&quot;chaos&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Machine&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;carriers&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:4,&quot;min&quot;:2,&quot;max&quot;:10,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;},&quot;taskRate&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1.5,&quot;min&quot;:0.3,&quot;max&quot;:4,&quot;step&quot;:0.1,&quot;unit&quot;:&quot;tasks/s&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Machine&quot;},&quot;chaos&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Machine&quot;}}">
 class Component extends DCLogic {
   state = { stats:{runnable:0,mounted:0,parked:0,completed:0}, feed:['— boot sequence initiated —'], fMount:0,fPark:0,fResume:0,fPin:0, statusText:'BOOTING', playLabel:'Pause', speedLabel:'1.00×' };
   renderVals(){
@@ -105,7 +105,7 @@ class Component extends DCLogic {
   log(msg){ const s=this.sim; s.feed.unshift(('00'+Math.floor(s.t)).slice(-3)+'s '+msg); s.feed=s.feed.slice(0,9); }
   flash(k){ this.sim.flash[k]=this.sim.t; }
   componentDidMount(){
-    const C = Math.max(2, Math.min(6, this.props.carriers ?? 4));
+    const C = Math.max(2, Math.min(10, this.props.carriers ?? 4));
     this.sim = { t:0, boot:0, speed:1, running:true, vts:[], queue:[], nextId:1, spawnAcc:0, burst:0, completed:0,
       flash:{mount:-9,park:-9,resume:-9,pin:-9}, feed:['boot: power on'],
       carriers:Array.from({length:C},()=>({vt:null,pinT:0,heat:0})) };
@@ -135,7 +135,7 @@ class Component extends DCLogic {
     const s=this.sim; vt.carrier.vt=null; vt.carrier=null; vt.state='parking'; vt.io=1.8+Math.random()*3;
     const parked=s.vts.filter(v=>v.state==='parked'||v.state==='parking').length;
     this.animTo(vt, this.storeSlot(parked), 0.8, ()=>{ vt.state='parked'; });
-    this.flash('park'); this.log('VT-'+vt.id+' parked · carrier released');
+    this.flash('park'); this.log('VT-'+vt.id+' I/O wait · carrier released');
   }
   pin(vt){ vt.carrier.pinT=2.4+Math.random()*1.2; this.flash('pin'); this.log('VT-'+vt.id+' PINNED carrier C'+(this.sim.carriers.indexOf(vt.carrier)+1)); }
   tick(dt){
@@ -243,7 +243,7 @@ class Component extends DCLogic {
     }
     // SNAPSHOT STORE
     c1=this.plat(g.store.u,g.store.v,g.store.z-rise(4),74,44,12,'rgba(40,32,72,.9)','#171129','rgba(167,139,250,.5)',A(4));
-    this.label({x:c1.x,y:c1.y},'CONTINUATION SNAPSHOTS','#a78bfa',A(4));
+    this.label({x:c1.x,y:c1.y},'I/O WAIT · PARKED STACK CHUNKS','#a78bfa',A(4));
     this.label({x:c1.x,y:c1.y+14},'stacks stored on the heap','#6b6394',A(4),10);
     // CARRIERS
     c1=this.plat(0,0,g.zCarrier-rise(1),qw+50,36,12,'rgba(18,36,58,.95)','#0b1626','rgba(96,165,250,.6)',A(1));
