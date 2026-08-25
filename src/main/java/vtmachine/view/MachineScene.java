@@ -63,6 +63,15 @@ public final class MachineScene extends StackPane {
     private record BootLayer(Group group, double restY, int order) {}
     private record CpuCore(Group gear, List<Shape3D> heatSurfaces) {}
     private record CoreActivity(Group indicator, Cylinder piston, List<Sphere> sparks) {}
+    private static final class GearMotion {
+        double angle;
+        double velocity;
+        double stutter;
+
+        GearMotion(double angle) {
+            this.angle = angle;
+        }
+    }
 
     private final Sim sim;
     private final Group root3d = new Group();
@@ -89,6 +98,7 @@ public final class MachineScene extends StackPane {
     private final List<BootLayer> bootLayers = new ArrayList<>();
     private final List<ProjectedLabel> projectedLabels = new ArrayList<>();
     private final List<CpuCore> cores = new ArrayList<>();
+    private final List<GearMotion> coreGearMotions = new ArrayList<>();
     private final List<CoreActivity> coreActivities = new ArrayList<>();
     private final List<Cylinder> carrierPillars = new ArrayList<>();
     private final List<TorusMesh> slots = new ArrayList<>();
@@ -148,6 +158,7 @@ public final class MachineScene extends StackPane {
     private Quality requestedQuality = Quality.AUTO;
     private boolean autoLow;
     private boolean highContrast;
+    private double lastGearDisplayTime = Double.NaN;
 
     public MachineScene(Sim sim) {
         this.sim = sim;
@@ -550,6 +561,7 @@ public final class MachineScene extends StackPane {
         double x = sim.laneX(index);
         CpuCore core = buildCpuCore(x);
         cores.add(core);
+        coreGearMotions.add(new GearMotion(index * 31));
 
         Group indicator = new Group();
         indicator.setTranslateX(x);
@@ -828,7 +840,7 @@ public final class MachineScene extends StackPane {
         schedulerRing.setRotate(displayTime() * 1.5 * 180 / Math.PI);
         double schedulerRise = clamp((displayBootT() - 1.0) / 0.5, 0, 1);
         schedulerRing.setMaterial(schedulerRise > 0.6 ? schedulerBright : schedulerDim);
-        syncCarriers();
+        syncCarriers(gearAnimationDelta());
         syncApplicationTaskIngress();
         syncQueuePressure(dt);
         camera.sync();
@@ -851,7 +863,18 @@ public final class MachineScene extends StackPane {
         }
     }
 
-    private void syncCarriers() {
+    private double gearAnimationDelta() {
+        double now = displayTime();
+        if (!Double.isFinite(lastGearDisplayTime)) {
+            lastGearDisplayTime = now;
+            return 0;
+        }
+        double delta = now - lastGearDisplayTime;
+        lastGearDisplayTime = now;
+        return delta > 0 && delta <= 0.25 ? delta : 0;
+    }
+
+    private void syncCarriers(double motionDt) {
         for (int i = 0; i < displayCarrierCount(); i++) {
             boolean pinned = displayCarrierPinned(i);
             boolean working = displayCarrierMounted(i);
@@ -883,8 +906,16 @@ public final class MachineScene extends StackPane {
                     : working ? 1 + 0.045 * Math.sin(displayTime() * 11 + i) : 1);
             core.gear().setTranslateY(6 + (working && !pinned
                     ? 0.45 * (0.5 + 0.5 * Math.sin(displayTime() * 11 + i)) : 0));
-            core.gear().setRotate(pinned ? Math.sin(displayTime() * 8 + i) * 9
-                    : working ? displayTime() * 70 + i * 31 : 0);
+            GearMotion gearMotion = coreGearMotions.get(i);
+            double targetVelocity = working && !pinned ? 82 + heatLevel * 13 : 0;
+            double response = working && !pinned ? 4.5 : pinned ? 8 : 2.6;
+            double velocityBlend = 1 - Math.exp(-motionDt * response);
+            gearMotion.velocity += (targetVelocity - gearMotion.velocity) * velocityBlend;
+            gearMotion.angle = (gearMotion.angle + gearMotion.velocity * motionDt) % 360;
+            double stutterBlend = 1 - Math.exp(-motionDt * 7);
+            gearMotion.stutter += ((pinned ? 1 : 0) - gearMotion.stutter) * stutterBlend;
+            double pinnedOffset = gearMotion.stutter * Math.sin(displayTime() * 8 + i) * 7;
+            core.gear().setRotate(gearMotion.angle + pinnedOffset);
             Cylinder pillar = carrierPillars.get(i);
             pillar.setMaterial(pinned ? coreActivityPinned
                     : working ? coreActivityActive : activeSlot);
