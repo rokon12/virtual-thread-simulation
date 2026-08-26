@@ -101,6 +101,7 @@ public final class MachineScene extends StackPane {
     private final Canvas spotlightCanvas = new Canvas();
     private final Canvas continuationCanvas = new Canvas();
     private final Canvas consequenceCanvas = new Canvas(620, 84);
+    private final Canvas finaleCanvas = new Canvas();
     private final CameraRig camera = new CameraRig();
     private final Label tooltip = new Label();
     private final HBox cameraButtons;
@@ -190,6 +191,7 @@ public final class MachineScene extends StackPane {
     private double spotlightElapsed = Double.POSITIVE_INFINITY;
     private double lastSpotlightEventTime = -99;
     private int lastSoundCompleted;
+    private boolean finaleSoundPlayed;
 
     public MachineScene(Sim sim) {
         this.sim = sim;
@@ -229,6 +231,11 @@ public final class MachineScene extends StackPane {
         continuationCanvas.setVisible(false);
         consequenceCanvas.setMouseTransparent(true);
         consequenceCanvas.setAccessibleRole(AccessibleRole.TEXT);
+        finaleCanvas.setMouseTransparent(true);
+        finaleCanvas.widthProperty().bind(widthProperty());
+        finaleCanvas.heightProperty().bind(heightProperty());
+        finaleCanvas.setAccessibleRole(AccessibleRole.TEXT);
+        finaleCanvas.setVisible(false);
         tooltip.getStyleClass().add("vt-tooltip");
         tooltip.setManaged(false);
         tooltip.setVisible(false);
@@ -259,7 +266,7 @@ public final class MachineScene extends StackPane {
 
         getChildren().addAll(subScene, terminationCanvas, labelOverlay, cameraButtons, presentationButtons, shortcut,
                 diagnostics, spotlightCanvas, continuationCanvas, comparisonOverlay,
-                lessonCanvas, jdkShowdownCanvas, consequenceCanvas, followOverlay);
+                lessonCanvas, jdkShowdownCanvas, finaleCanvas, consequenceCanvas, followOverlay);
         StackPane.setAlignment(cameraButtons, Pos.TOP_RIGHT);
         StackPane.setMargin(cameraButtons, new Insets(14, 16, 0, 0));
         StackPane.setAlignment(presentationButtons, Pos.TOP_RIGHT);
@@ -921,6 +928,7 @@ public final class MachineScene extends StackPane {
         syncContinuationXray();
         syncSoundscape();
         drawConsequenceMeter();
+        drawScaleFinale();
         syncFollowOverlay();
         syncComparisonOverlay();
         syncJdkShowdown();
@@ -1319,7 +1327,8 @@ public final class MachineScene extends StackPane {
 
     private void syncCinematicSpotlight(double dt) {
         boolean eligible = cinematicEnabled && replayFrame == null && !displayFreeRun()
-                && displayScenario() == Sim.Scenario.NONE && !displayJdkShowdown().active();
+                && displayScenario() == Sim.Scenario.NONE && displayChapter() != 5
+                && !displayJdkShowdown().active();
         if (!eligible) {
             spotlightCanvas.setVisible(false);
             spotlightElapsed = Double.POSITIVE_INFINITY;
@@ -1420,7 +1429,7 @@ public final class MachineScene extends StackPane {
 
     private void syncContinuationXray() {
         boolean eligible = !displayFreeRun() && displayScenario() == Sim.Scenario.NONE
-                && !displayJdkShowdown().active();
+                && displayChapter() != 5 && !displayJdkShowdown().active();
         if (!eligible) {
             continuationCanvas.setVisible(false);
             return;
@@ -1581,6 +1590,15 @@ public final class MachineScene extends StackPane {
 
     private void syncSoundscape() {
         if (!soundscape.enabled() || replayFrame != null) return;
+        if (displayChapter() == 5) {
+            if (displayChapterAge() >= 6 && !finaleSoundPlayed) {
+                soundscape.play(Soundscape.Cue.COMPLETE);
+                finaleSoundPlayed = true;
+            }
+            lastSoundCompleted = displayStats().completed();
+            return;
+        }
+        finaleSoundPlayed = false;
         for (Sim.Flash flash : Sim.Flash.values()) {
             double age = displayFlashAge(flash);
             double eventTime = displayTime() - age;
@@ -1598,6 +1616,90 @@ public final class MachineScene extends StackPane {
         int completed = displayStats().completed();
         if (completed > lastSoundCompleted) soundscape.play(Soundscape.Cue.COMPLETE);
         lastSoundCompleted = completed;
+    }
+
+    private void drawScaleFinale() {
+        boolean visible = displayChapter() == 5 && displayChapterAge() >= 0.4;
+        finaleCanvas.setVisible(visible);
+        if (!visible) return;
+        double age = displayChapterAge();
+        double pullback = clamp((age - 0.8) / 5.2, 0, 1);
+        if (replayFrame == null) camera.toScaleFinale(pullback);
+        GraphicsContext graphics = finaleCanvas.getGraphicsContext2D();
+        double width = finaleCanvas.getWidth();
+        double height = finaleCanvas.getHeight();
+        graphics.clearRect(0, 0, width, height);
+
+        int visibleThreads = displayVts().size();
+        double surge = clamp((age - 0.4) / 3.8, 0, 1);
+        for (int i = 0; i < 150; i++) {
+            double angle = i * 2.399963229728653 + age * (0.08 + i % 5 * 0.012);
+            double radius = 70 + (i % 31) * 8.5 * surge;
+            double x = width / 2 + Math.cos(angle) * radius * 1.55;
+            double y = height * 0.36 + Math.sin(angle) * radius * 0.58;
+            double pulse = 0.35 + 0.65 * Math.sin(Math.PI * ((age * 0.45 + i * 0.037) % 1));
+            Color dotColor = switch (i % 4) {
+                case 0 -> GREEN;
+                case 1 -> BLUE;
+                case 2 -> PURPLE;
+                default -> AMBER;
+            };
+            graphics.setFill(dotColor.deriveColor(0, 1, 1, pulse * 0.55 * surge));
+            double size = 1.5 + i % 3;
+            graphics.fillOval(x, y, size, size);
+        }
+
+        double finalReveal = clamp((age - 5.6) / 1.1, 0, 1);
+        if (finalReveal < 0.01) {
+            double bannerWidth = 430;
+            double bannerX = width / 2 - bannerWidth / 2;
+            graphics.setFill(Color.web("#08111d", 0.9));
+            graphics.fillRoundRect(bannerX, 52, bannerWidth, 68, 15, 15);
+            graphics.setStroke(GREEN.deriveColor(0, 1, 1, 0.85));
+            graphics.strokeRoundRect(bannerX + 0.5, 52.5, bannerWidth - 1, 67, 15, 15);
+            graphics.setTextAlign(TextAlignment.CENTER);
+            graphics.setFill(GREEN);
+            graphics.setFont(Font.font("IBM Plex Mono", 11));
+            graphics.fillText("VIRTUAL THREAD SURGE", width / 2, 74);
+            graphics.setFill(WHITE);
+            graphics.setFont(Font.font("Space Grotesk", 26));
+            graphics.fillText(visibleThreads + " / " + displayMaxThreads() + " VTs", width / 2, 106);
+        } else {
+            graphics.setFill(Color.web("#02050a", 0.58 * finalReveal));
+            graphics.fillRect(0, 0, width, height);
+            double panelWidth = Math.min(720, width - 48);
+            double panelHeight = 238;
+            double panelX = (width - panelWidth) / 2;
+            double panelY = Math.max(80, height * 0.22);
+            graphics.setFill(Color.web("#08111d", 0.97 * finalReveal));
+            graphics.fillRoundRect(panelX, panelY, panelWidth, panelHeight, 24, 24);
+            graphics.setStroke(GREEN.deriveColor(0, 1, 1, finalReveal));
+            graphics.setLineWidth(2.2);
+            graphics.strokeRoundRect(panelX + 0.7, panelY + 0.7,
+                    panelWidth - 1.4, panelHeight - 1.4, 24, 24);
+            graphics.setTextAlign(TextAlignment.CENTER);
+            graphics.setFill(GREEN.deriveColor(0, 1, 1, finalReveal));
+            graphics.setFont(Font.font("IBM Plex Mono", 11));
+            graphics.fillText("THE VIRTUAL THREAD PAYOFF", width / 2, panelY + 30);
+            graphics.setFill(WHITE.deriveColor(0, 1, 1, finalReveal));
+            graphics.setFont(Font.font("Space Grotesk",
+                    javafx.scene.text.FontWeight.BOLD, 38));
+            graphics.fillText(displayMaxThreads() + " VIRTUAL THREADS", width / 2, panelY + 82);
+            graphics.setFill(AMBER.deriveColor(0, 1, 1, finalReveal));
+            graphics.setFont(Font.font("Space Grotesk",
+                    javafx.scene.text.FontWeight.SEMI_BOLD, 25));
+            graphics.fillText(displayCarrierCount() + " CARRIER / OS THREADS", width / 2, panelY + 122);
+            graphics.setFill(PURPLE.deriveColor(0, 1, 1, finalReveal));
+            graphics.setFont(Font.font("IBM Plex Mono", 14));
+            graphics.fillText("PARKED VTs USE 0 CARRIERS", width / 2, panelY + 158);
+            graphics.setStroke(Color.web("#26364a", finalReveal));
+            graphics.strokeLine(panelX + 56, panelY + 180, panelX + panelWidth - 56, panelY + 180);
+            graphics.setFill(Color.web("#b6c6d8", finalReveal));
+            graphics.setFont(Font.font("IBM Plex Mono", 11));
+            graphics.fillText("THE MACHINE STAYS THE SAME SIZE", width / 2, panelY + 208);
+        }
+        finaleCanvas.setAccessibleText("Scale finale. " + displayMaxThreads() + " virtual threads use "
+                + displayCarrierCount() + " carrier and OS threads. Parked virtual threads use no carrier.");
     }
 
     private void syncJdkShowdown() {
@@ -2009,6 +2111,10 @@ public final class MachineScene extends StackPane {
     private double displayTime() { return replayFrame == null ? sim.time() : replayFrame.time(); }
     private double displayBootT() { return replayFrame == null ? sim.bootT() : replayFrame.bootT(); }
     private int displayChapter() { return replayFrame == null ? sim.chapter() : replayFrame.chapter(); }
+    private double displayChapterAge() {
+        return replayFrame == null ? sim.chapterAge() : replayFrame.chapterAge();
+    }
+    private int displayMaxThreads() { return replayFrame == null ? sim.maxThreads() : replayFrame.maxThreads(); }
     private boolean displayFreeRun() { return replayFrame == null ? sim.freeRun() : replayFrame.freeRun(); }
     private boolean displayLiveMode() { return replayFrame == null ? sim.liveMode() : replayFrame.liveMode(); }
     private Sim.JdkComparison displayJdkComparison() {

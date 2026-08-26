@@ -151,6 +151,19 @@ class SimTest {
     }
 
     @Test
+    void chapterAgeResetsForFinaleChoreography() {
+        Sim sim = runningMachine(31);
+        advance(sim, 1.0);
+        assertTrue(sim.chapterAge() > 0.9);
+
+        sim.gotoChapter(5);
+
+        assertEquals(0, sim.chapterAge(), 1e-9);
+        advance(sim, 0.5);
+        assertTrue(sim.chapterAge() >= 0.49);
+    }
+
+    @Test
     void comparisonRunsTheSameBlockingWorkloadOnAFixedCarrierPool() {
         Sim sim = new Sim(4, 100, 1.4, 101);
         advance(sim, 3.1);

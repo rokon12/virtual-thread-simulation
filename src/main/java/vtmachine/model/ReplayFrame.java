@@ -20,7 +20,7 @@ import vtmachine.model.Sim.TaskProfile;
 import vtmachine.model.Sim.VtState;
 
 /** Immutable display snapshot used to inspect history without rewinding the live model. */
-public record ReplayFrame(double time, double bootT, int chapter, boolean freeRun,
+public record ReplayFrame(double time, double bootT, int chapter, double chapterAge, boolean freeRun,
         boolean liveMode, int maxThreads, Scenario scenario, JdkComparison jdkComparison,
         JdkShowdown jdkShowdown, int scenarioSubmitted,
         Stats stats, ConsequenceStats consequenceStats, ProfileStats profileStats, double averageIoSeconds,
@@ -77,7 +77,7 @@ public record ReplayFrame(double time, double bootT, int chapter, boolean freeRu
                 .toList();
         EnumMap<Flash, Double> flashAges = new EnumMap<>(Flash.class);
         for (Flash flash : Flash.values()) flashAges.put(flash, sim.flashAge(flash));
-        return new ReplayFrame(now, sim.bootT(), sim.chapter(), sim.freeRun(), sim.liveMode(),
+        return new ReplayFrame(now, sim.bootT(), sim.chapter(), sim.chapterAge(), sim.freeRun(), sim.liveMode(),
                 sim.maxThreads(), sim.scenario(), sim.jdkComparison(), sim.jdkShowdown(),
                 sim.scenarioSubmitted(), sim.stats(), sim.consequenceStats(),
                 sim.profileStats(), sim.averageIoSeconds(), sim.carrierUtilization(),

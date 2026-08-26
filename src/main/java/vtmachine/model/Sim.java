@@ -127,6 +127,7 @@ public final class Sim {
 
     private long nextId;
     private double time;
+    private double chapterStartedAt;
     private double bootT;
     private double speed = 0.75;
     private double spawnRate;
@@ -860,6 +861,7 @@ public final class Sim {
         Scenario previousScenario = scenario;
         if (selected >= 6 || previousScenario != Scenario.NONE) clearWorkload();
         chapter = selected;
+        chapterStartedAt = time;
         freeRun = false;
         chaos = false;
         spawnRate = 0;
@@ -970,6 +972,7 @@ public final class Sim {
         pinnedThreadSeconds = 0;
         parkedThreadSeconds = 0;
         chapter = 0;
+        chapterStartedAt = 0;
         running = true;
         freeRun = false;
         chaos = false;
@@ -1078,6 +1081,7 @@ public final class Sim {
     public int chapter() { return chapter; }
     public double bootT() { return bootT; }
     public double time() { return time; }
+    public double chapterAge() { return Math.max(0, time - chapterStartedAt); }
     public double speed() { return speed; }
     public boolean running() { return running; }
     public boolean freeRun() { return freeRun; }

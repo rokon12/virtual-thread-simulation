@@ -87,6 +87,12 @@ locally synthesized mount, park, resume, pin-warning, and completion cues. The
 cues require no media files or network access and automatically remain disabled
 if the operating system has no available audio output line.
 
+The `SCALE` chapter now closes as a staged finale. While the configured VT
+workload floods the model, the camera gradually pulls back and a colored
+constellation spreads around the machine. The motion resolves into a held title
+card showing the configured virtual-thread count, the small carrier/OS-thread
+count, and the central takeaway: parked VTs use zero carriers.
+
 The sidebar includes live total, carrier utilization, average I/O, event-log
 highlighting, and a rolling completions/second chart. `AUTO` render quality
 hides nonessential glows when frame rate drops or the task pool becomes dense.

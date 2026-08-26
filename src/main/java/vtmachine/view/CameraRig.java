@@ -39,6 +39,12 @@ public final class CameraRig {
         };
     }
 
+    public void toScaleFinale(double progress) {
+        double amount = clamp(progress, 0, 1);
+        goal = new Orbit(0.65 + amount * 0.12, 1.12 - amount * 0.22,
+                260 + amount * 105, 45 + amount * 3);
+    }
+
     public void beginDrag(double x, double y) {
         pointerX = x;
         pointerY = y;

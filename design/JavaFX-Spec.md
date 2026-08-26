@@ -229,6 +229,13 @@ short PCM cues are synthesized locally at 44.1 kHz for mount, park, resume, pin,
 and completion; no external media is loaded. Audio-line failure leaves the
 feature disabled without affecting the simulation or snapshot workflow.
 
+The SCALE chapter uses model-owned `chapterAge` for deterministic choreography.
+From 0.8–6.0 seconds the overview camera eases from distance 260 to 365 while a
+150-dot constellation expands around the live machine. At 5.6 seconds a final
+title card fades in and holds the configured VT count, actual carrier/OS-thread
+count, and `PARKED VTs USE 0 CARRIERS`. Replay captures `chapterAge`, so the
+entire finale remains scrubbable.
+
 ## 7 · Project Setup
 
 ```xml
@@ -351,7 +358,7 @@ Threading rule: everything above runs on the FX Application Thread. The only cro
 | 3 PARK | An I/O-bound VT reaches its randomized wait. It turns purple and flies to the heap area while its stack chunks remain with the virtual thread. Its carrier is instantly free to run another VT. |
 | 4 RESUME | The I/O completes. The stored continuation makes the VT runnable again and it remounts on ANY free carrier — not necessarily the one it left. Watch it land on a different slot. |
 | 5 JDK 21 vs 25 | Run the same blocking operation inside synchronized. On JDK 21 it pins the VT to its carrier. Since JDK 24 (JEP 491), JDK 25 can unmount it and release the carrier. Native or foreign-function frames may still pin. |
-| 6 SCALE | The payoff. 500 mixed-duration tasks flood in and the machine does not grow: a fixed set of illustrative carrier lanes multiplexes fast, compute-heavy, and I/O-bound virtual threads, while parked waits retain lightweight heap-backed state. |
+| 6 SCALE | The payoff. 500 mixed-duration tasks flood in while the camera pulls back and the run queue expands. A fixed carrier pool keeps draining work as parked VTs release their lanes. The finale holds the essential result: hundreds of VTs, only a handful of carrier and OS threads. |
 | 7 PLATFORM vs VT | Run the same blocking I/O workload two ways. A platform-thread-per-task design ties up one costly OS thread per wait; virtual threads park cheaply while a small, fixed carrier pool keeps executing other work. |
 | 8 POOL LIMIT | Virtual threads remove the thread bottleneck, not downstream limits. Only three tasks may hold a database connection; every other VT parks in the heap without occupying a carrier until a permit becomes available. |
 | 9 CPU BOUND | Virtual threads improve blocking concurrency, not CPU parallelism. Compute-only tasks saturate every carrier and the run queue grows, but throughput plateaus at the available carrier/core count. |
