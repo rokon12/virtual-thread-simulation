@@ -66,6 +66,25 @@ class SimTest {
     }
 
     @Test
+    void jdkShowdownRunsTheSameQueueSideBySide() {
+        Sim sim = runningMachine(17);
+
+        assertTrue(sim.startJdkShowdown());
+        advance(sim, 3.0);
+
+        Sim.JdkShowdown race = sim.jdkShowdown();
+        assertTrue(race.active());
+        assertTrue(race.jdk21Pinned());
+        assertTrue(race.jdk25Parked());
+        assertEquals(race.totalTasks(), race.jdk21Queued());
+        assertTrue(race.jdk25Completed() > race.jdk21Completed());
+        assertTrue(race.jdk25Queued() < race.jdk21Queued());
+
+        advance(sim, 7.0);
+        assertFalse(sim.jdkShowdown().active());
+    }
+
+    @Test
     void pinFreezesWorkUntilItExpires() {
         Sim sim = runningMachine(19);
         Vt running = sim.vts().stream().filter(v -> v.state() == Sim.VtState.RUNNING).findFirst().orElseThrow();
@@ -81,13 +100,14 @@ class SimTest {
     }
 
     @Test
-    void pinnedChapterCreatesVisibleQueuePressureBehindTheBlockedCarrier() {
+    void jdkComparisonChapterStartsTheSplitScreenRace() {
         Sim sim = runningMachine(23);
         sim.gotoChapter(4);
-        advance(sim, 0.25);
+        advance(sim, 3.0);
 
-        assertTrue(sim.carriers().stream().anyMatch(Carrier::pinned));
-        assertTrue(sim.stats().runnable() > 0, "the comparison should show work waiting behind saturated lanes");
+        assertTrue(sim.jdkShowdown().active());
+        assertTrue(sim.jdkShowdown().jdk21Pinned());
+        assertTrue(sim.jdkShowdown().jdk25Completed() > sim.jdkShowdown().jdk21Completed());
     }
 
     @Test

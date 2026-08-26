@@ -35,6 +35,13 @@ public final class Sim {
     public record ResourcePoolStats(int capacity, int inUse, int waiting) {}
     public record ScopeStats(int id, String name, int total, int active,
             int succeeded, int failed, int cancelled, boolean joined) {}
+    public record JdkShowdown(boolean active, double elapsed, int totalTasks,
+            int jdk21Completed, int jdk21Queued, boolean jdk21Pinned,
+            int jdk25Completed, int jdk25Queued, boolean jdk25Parked) {
+        private static JdkShowdown inactive() {
+            return new JdkShowdown(false, 0, 8, 0, 8, false, 0, 8, false);
+        }
+    }
 
     public enum Scenario {
         NONE, PLATFORM_COMPARISON, RESOURCE_POOL, CPU_BOUND, STRUCTURED
@@ -135,6 +142,7 @@ public final class Sim {
     private boolean liveMode;
     private Scenario scenario = Scenario.NONE;
     private JdkComparison jdkComparison = JdkComparison.NONE;
+    private double jdkShowdownStartedAt = -1;
     private int scenarioSubmitted;
     private int scenarioSpawned;
     private int permitsInUse;
@@ -756,6 +764,7 @@ public final class Sim {
             return false;
         }
         jdkComparison = JdkComparison.JDK_21_PINNED;
+        jdkShowdownStartedAt = -1;
         clearPinnedCarriers();
         for (Vt vt : vts) {
             if (vt.state == VtState.RUNNING && vt.carrier != null && !vt.carrier.pinned()) {
@@ -774,6 +783,7 @@ public final class Sim {
             return false;
         }
         jdkComparison = JdkComparison.JDK_25_UNMOUNTED;
+        jdkShowdownStartedAt = -1;
         clearPinnedCarriers();
         for (Vt vt : vts) {
             if (vt.state == VtState.RUNNING && vt.carrier != null) {
@@ -784,6 +794,34 @@ public final class Sim {
         pendingJdkComparison = JdkComparison.JDK_25_UNMOUNTED;
         addLog("JDK 25 synchronized demo armed · waiting for VT");
         return false;
+    }
+
+    public boolean startJdkShowdown() {
+        if (liveMode) {
+            addLog("JDK showdown is available in synthetic mode");
+            return false;
+        }
+        jdkComparison = JdkComparison.NONE;
+        pendingJdkComparison = JdkComparison.NONE;
+        clearPinnedCarriers();
+        jdkShowdownStartedAt = time;
+        addLog("showdown: same synchronized wait · JDK 21 vs JDK 25");
+        return true;
+    }
+
+    public JdkShowdown jdkShowdown() {
+        if (jdkShowdownStartedAt < 0) return JdkShowdown.inactive();
+        double elapsed = Math.max(0, time - jdkShowdownStartedAt);
+        if (elapsed > 9.5) return JdkShowdown.inactive();
+        int total = 8;
+        boolean blocked = elapsed >= 0.75 && elapsed < 5.75;
+        int jdk21Completed = elapsed < 5.75 ? 0
+                : Math.min(total, (int) Math.floor((elapsed - 5.75) / 0.55));
+        int jdk25Completed = elapsed < 1.1 ? 0
+                : Math.min(total, (int) Math.floor((elapsed - 1.1) / 0.55));
+        return new JdkShowdown(true, elapsed, total,
+                jdk21Completed, total - jdk21Completed, blocked,
+                jdk25Completed, total - jdk25Completed, blocked);
     }
 
     private void clearPinnedCarriers() {
@@ -812,6 +850,7 @@ public final class Sim {
         pendingJdkComparison = JdkComparison.NONE;
         scenario = Scenario.NONE;
         jdkComparison = JdkComparison.NONE;
+        jdkShowdownStartedAt = -1;
         scenarioSubmitted = 0;
         scenarioSpawned = 0;
 
@@ -839,10 +878,7 @@ public final class Sim {
             }
             case 4 -> {
                 if (!liveMode) {
-                    if (vts.stream().noneMatch(v -> v.state == VtState.RUNNING)) burst += 4;
-                    burst += carriers.size() * 3;
-                    pendingJdkComparison = JdkComparison.JDK_21_PINNED;
-                    jdkComparison = JdkComparison.JDK_21_PINNED;
+                    jdkShowdownStartedAt = time;
                 }
                 addLog("chapter: JDK 21 vs 25 synchronized blocking");
             }
@@ -923,6 +959,7 @@ public final class Sim {
         bootAutoAdvanced = false;
         scenario = Scenario.NONE;
         jdkComparison = JdkComparison.NONE;
+        jdkShowdownStartedAt = -1;
         scenarioSubmitted = 0;
         scenarioSpawned = 0;
         hero = null;
@@ -955,6 +992,7 @@ public final class Sim {
         hero = null;
         pendingJdkComparison = JdkComparison.NONE;
         jdkComparison = JdkComparison.NONE;
+        jdkShowdownStartedAt = -1;
         for (Carrier carrier : carriers) {
             carrier.mounted = null;
             carrier.pinT = 0;

@@ -7,6 +7,7 @@ import java.util.Map;
 import vtmachine.model.Sim.Flash;
 import vtmachine.model.Sim.IoDevice;
 import vtmachine.model.Sim.JdkComparison;
+import vtmachine.model.Sim.JdkShowdown;
 import vtmachine.model.Sim.LifecyclePhase;
 import vtmachine.model.Sim.Outcome;
 import vtmachine.model.Sim.ProfileStats;
@@ -20,7 +21,7 @@ import vtmachine.model.Sim.VtState;
 /** Immutable display snapshot used to inspect history without rewinding the live model. */
 public record ReplayFrame(double time, double bootT, int chapter, boolean freeRun,
         boolean liveMode, int maxThreads, Scenario scenario, JdkComparison jdkComparison,
-        int scenarioSubmitted,
+        JdkShowdown jdkShowdown, int scenarioSubmitted,
         Stats stats, ProfileStats profileStats, double averageIoSeconds,
         double carrierUtilization, ResourcePoolStats resourcePoolStats,
         List<ScopeStats> structuredScopes, List<String> log,
@@ -76,7 +77,8 @@ public record ReplayFrame(double time, double bootT, int chapter, boolean freeRu
         EnumMap<Flash, Double> flashAges = new EnumMap<>(Flash.class);
         for (Flash flash : Flash.values()) flashAges.put(flash, sim.flashAge(flash));
         return new ReplayFrame(now, sim.bootT(), sim.chapter(), sim.freeRun(), sim.liveMode(),
-                sim.maxThreads(), sim.scenario(), sim.jdkComparison(), sim.scenarioSubmitted(), sim.stats(),
+                sim.maxThreads(), sim.scenario(), sim.jdkComparison(), sim.jdkShowdown(),
+                sim.scenarioSubmitted(), sim.stats(),
                 sim.profileStats(), sim.averageIoSeconds(), sim.carrierUtilization(),
                 sim.resourcePoolStats(), sim.structuredScopes(), List.copyOf(sim.log()),
                 Map.copyOf(flashAges), carrierFrames, threadFrames);

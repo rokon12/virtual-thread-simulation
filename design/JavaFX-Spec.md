@@ -87,7 +87,7 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 | 2 | MOUNT | burst +6, chaos off | carriers (0.35, 1.25, 150, 30) |
 | 3 | PARK | pendingPark=true (next running VT parks) | heap (−0.55, 1.15, 170, 45) |
 | 4 | RESUME | clamp a parked VT's io ≤ 0.8 s | carriers |
-| 5 | JDK 21 vs 25 | arm JDK 21 synchronized-block comparison | carriers |
+| 5 | JDK 21 vs 25 | start the split-screen eight-task showdown | carriers |
 | 6 | SCALE | burst to 500, chaos on | overview · TOP preset = (0.65, 0.35, 300, 40) |
 | 7 | PLATFORM vs VT | clear workload; submit the same I/O-bound task count to the virtual-thread model; show the platform-thread baseline | overview |
 | 8 | POOL LIMIT | clear workload; submit database I/O tasks behind three connection permits | heap |
@@ -101,7 +101,7 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 | Header | Pulsing green LED (1.6 s), title, GUIDED/FREE RUN toggle (ToggleGroup), status text BOOTING/RUNNING/PAUSED |
 | Right sidebar 290px | Counters include RUNNABLE, MOUNTED, PARKED, COMPLETED, live total, and utilization · task-profile mix · throughput graph · 4 behavior cards · event log, 7 clickable mono lines |
 | Narration card | Bottom-left 400px overlay: CHAPTER n/10, colored title, body text, ←/Next buttons. Chapter copy: §10 verbatim |
-| Bottom bar | Pause/Run · +25 tasks · Force park · JDK 21 · JDK 25 · replay scrubber with marker rail and LIVE return · speed Slider + readout "0.75×" |
+| Bottom bar | Pause/Run · +25 tasks · Force park · JDK 21 · JDK 25 · Showdown · replay scrubber with marker rail and LIVE return · speed Slider + readout "0.75×" |
 | Keyboard | SPACE live/replay play-pause · J/K history step · L return live · ←/→ chapters (or slider step while focused) · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480) |
 | Hover / follow | PickResult on the VT pool → tooltip; click a VT or log line to pin a lifecycle card showing RUNNABLE / MOUNTED / PARKED / TERMINATED durations |
 
@@ -200,6 +200,11 @@ try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
 ```
 
 Virtual threads are final since Java 21 — no preview flags on 25. The two synthetic comparison buttons run the same modeled `synchronized (lock) { Thread.sleep(...); }` operation: JDK 21 pins the VT, while JDK 25 unmounts it and releases the carrier. Since Java 24 (JEP 491), `synchronized`, monitor entry, and `Object.wait()` can all unmount normally. A Java 25 pin can still occur with a native or foreign-function frame on the stack (for example, native code calling back into blocking Java code). The version buttons are disabled in `LIVE JDK`, which always reflects the host JDK rather than emulating JDK 21.
+
+`Showdown` opens a deterministic split-screen race with the same eight queued
+tasks on both sides. The JDK 21 lane retains its carrier for the five-second
+modeled wait; the JDK 25 lane moves the blocker to the heap and keeps completing
+queued work. Live completion and queue counters make the consequence visible.
 
 ## 7 · Project Setup
 
@@ -468,8 +473,7 @@ switch i:
   3 RESUME: p = first PARKED vt; if p: p.io = min(p.io, 0.8)
             else: burst += 2; pendingPark = true    // will park then quickly resume
             camera CARRIERS; log "chapter: resume"
-  4 JDK:    if no RUNNING vt: burst += 4; burst += carriers*3
-            pendingJdkComparison = JDK_21_PINNED; camera CARRIERS
+  4 JDK:    start the deterministic eight-task split-screen showdown; camera CARRIERS
             log "chapter: JDK 21 vs 25 synchronized blocking"
   5 SCALE:  burst += maxThreads − vts.size; chaos = true; camera OVERVIEW
             log "chapter: scale — flooding tasks"

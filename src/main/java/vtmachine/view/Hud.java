@@ -57,7 +57,7 @@ public final class Hud {
 
     public record Actions(Runnable playPause, IntConsumer chapter, Consumer<Boolean> freeRun,
             Consumer<Boolean> liveMode, Runnable burst, Runnable park,
-            Runnable jdk21Block, Runnable jdk25Block,
+            Runnable jdk21Block, Runnable jdk25Block, Runnable jdkShowdown,
             Runnable settings, Runnable about, LongConsumer highlight, IntConsumer replayFrame,
             Runnable returnLive, Runnable refocus) {}
 
@@ -75,6 +75,7 @@ public final class Hud {
     private final Button playButton = new Button("Pause");
     private Button jdk21Button;
     private Button jdk25Button;
+    private Button jdkShowdownButton;
     private final ToggleButton guided = new ToggleButton("GUIDED");
     private final ToggleButton freeRun = new ToggleButton("FREE RUN");
     private final ToggleButton synthetic = new ToggleButton("SYNTHETIC");
@@ -259,7 +260,7 @@ public final class Hud {
     }
 
     private HBox buildBottomBar() {
-        HBox bar = new HBox(10);
+        HBox bar = new HBox(8);
         bar.getStyleClass().add("bottom-bar");
         bar.setAlignment(Pos.CENTER_LEFT);
         playButton.getStyleClass().addAll("control-button", "play-button");
@@ -278,6 +279,8 @@ public final class Hud {
                 "JDK 21: blocking inside synchronized pins the virtual thread to its carrier");
         jdk25Button = controlButton("JDK 25", "jdk25-button", actions.jdk25Block,
                 "JDK 25: the same synchronized blocking operation unmounts and releases the carrier");
+        jdkShowdownButton = controlButton("Showdown", "showdown-button", actions.jdkShowdown,
+                "Run the JDK 21 and JDK 25 synchronized-blocking behaviors side by side");
         Button settings = controlButton("Settings", "settings-button", actions.settings,
                 "Change carrier count, task limit, task rate, and random seed");
         Button about = controlButton("About", "about-button", actions.about,
@@ -300,7 +303,7 @@ public final class Hud {
         });
         speedReadout.getStyleClass().add("speed-readout");
         speedReadout.setMinWidth(44);
-        bar.getChildren().addAll(playButton, burst, park, jdk21Button, jdk25Button,
+        bar.getChildren().addAll(playButton, burst, park, jdk21Button, jdk25Button, jdkShowdownButton,
                 settings, about, timelineControl,
                 performance, speedLabel, speedSlider, speedReadout);
         return bar;
@@ -336,7 +339,7 @@ public final class Hud {
         timelineMarkers.widthProperty().bind(timelineSlider.widthProperty());
         timelineControl = new VBox(-2, header, timelineSlider, timelineMarkers);
         timelineControl.getStyleClass().add("timeline-control");
-        timelineControl.setMinWidth(150);
+        timelineControl.setMinWidth(120);
         timelineControl.setPrefWidth(340);
         timelineControl.setMaxWidth(Double.MAX_VALUE);
         timelineControl.widthProperty().addListener((observable, oldValue, newValue) -> drawTimelineMarkers());
@@ -346,6 +349,7 @@ public final class Hud {
     private Button controlButton(String text, String styleClass, Runnable action, String help) {
         Button button = new Button(text);
         button.getStyleClass().addAll("control-button", styleClass);
+        button.setMinWidth(Region.USE_PREF_SIZE);
         button.setAccessibleText(help);
         button.setTooltip(new Tooltip(help));
         button.setOnAction(event -> {
@@ -478,6 +482,7 @@ public final class Hud {
         live.setSelected(displayedLive);
         jdk21Button.setDisable(displayedLive);
         jdk25Button.setDisable(displayedLive);
+        jdkShowdownButton.setDisable(displayedLive);
         Sim.ProfileStats mix = replayFrame == null ? sim.profileStats() : replayFrame.profileStats();
         double averageIo = replayFrame == null ? sim.averageIoSeconds() : replayFrame.averageIoSeconds();
         feedNotice.setText((displayedLive

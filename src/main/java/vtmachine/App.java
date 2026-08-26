@@ -129,6 +129,7 @@ public final class App extends Application {
         Hud.Actions actions = new Hud.Actions(this::togglePlayPause, this::gotoChapter, this::setFreeRun,
                 this::switchLiveMode, () -> submitTasks(25), this::forcePark,
                 this::demonstrateJdk21SynchronizedBlock, this::demonstrateJdk25SynchronizedBlock,
+                this::startJdkShowdown,
                 this::showSettings, this::showAbout, machine::highlightVt, this::showReplayFrame,
                 this::returnLive, machine::requestFocus);
         hud = new Hud(sim, replayTimeline, actions);
@@ -376,6 +377,11 @@ public final class App extends Application {
             sim.burst(Math.max(4, sim.carriers().size()));
         }
         captureReplayNow();
+    }
+
+    private void startJdkShowdown() {
+        if (replaying) returnLive();
+        if (sim.startJdkShowdown()) captureReplayNow();
     }
 
     private void setFreeRun(boolean enabled) {

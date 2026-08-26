@@ -80,6 +80,7 @@ public final class MachineScene extends StackPane {
     private final Pane labelOverlay = new Pane();
     private final Canvas terminationCanvas = new Canvas();
     private final Canvas lessonCanvas = new Canvas(680, 168);
+    private final Canvas jdkShowdownCanvas = new Canvas(760, 250);
     private final CameraRig camera = new CameraRig();
     private final Label tooltip = new Label();
     private final HBox cameraButtons;
@@ -184,6 +185,9 @@ public final class MachineScene extends StackPane {
         lessonCanvas.setMouseTransparent(true);
         lessonCanvas.setAccessibleRole(AccessibleRole.TEXT);
         lessonCanvas.setVisible(false);
+        jdkShowdownCanvas.setMouseTransparent(true);
+        jdkShowdownCanvas.setAccessibleRole(AccessibleRole.TEXT);
+        jdkShowdownCanvas.setVisible(false);
         tooltip.getStyleClass().add("vt-tooltip");
         tooltip.setManaged(false);
         tooltip.setVisible(false);
@@ -212,7 +216,7 @@ public final class MachineScene extends StackPane {
         diagnostics.setMouseTransparent(true);
 
         getChildren().addAll(subScene, terminationCanvas, labelOverlay, cameraButtons, shortcut,
-                diagnostics, comparisonOverlay, lessonCanvas, followOverlay);
+                diagnostics, comparisonOverlay, lessonCanvas, jdkShowdownCanvas, followOverlay);
         StackPane.setAlignment(cameraButtons, Pos.TOP_RIGHT);
         StackPane.setMargin(cameraButtons, new Insets(14, 16, 0, 0));
         StackPane.setAlignment(shortcut, Pos.BOTTOM_RIGHT);
@@ -223,6 +227,8 @@ public final class MachineScene extends StackPane {
         StackPane.setMargin(comparisonOverlay, new Insets(14, 0, 0, 0));
         StackPane.setAlignment(lessonCanvas, Pos.TOP_CENTER);
         StackPane.setMargin(lessonCanvas, new Insets(56, 0, 0, 0));
+        StackPane.setAlignment(jdkShowdownCanvas, Pos.TOP_CENTER);
+        StackPane.setMargin(jdkShowdownCanvas, new Insets(54, 0, 0, 0));
         StackPane.setAlignment(followOverlay, Pos.TOP_LEFT);
         StackPane.setMargin(followOverlay, new Insets(54, 0, 0, 16));
 
@@ -851,6 +857,7 @@ public final class MachineScene extends StackPane {
         syncTerminationEffects();
         syncFollowOverlay();
         syncComparisonOverlay();
+        syncJdkShowdown();
         syncResourcePool();
         drawLessonOverlay();
         projectLabels();
@@ -1244,6 +1251,110 @@ public final class MachineScene extends StackPane {
                 + " pinned · " + waiting + " queued");
     }
 
+    private void syncJdkShowdown() {
+        Sim.JdkShowdown race = displayJdkShowdown();
+        jdkShowdownCanvas.setVisible(race.active());
+        if (!race.active()) return;
+        comparisonOverlay.setVisible(false);
+        GraphicsContext graphics = jdkShowdownCanvas.getGraphicsContext2D();
+        double width = jdkShowdownCanvas.getWidth();
+        double height = jdkShowdownCanvas.getHeight();
+        graphics.clearRect(0, 0, width, height);
+        graphics.setFill(Color.web("#08111d", 0.97));
+        graphics.fillRoundRect(0, 0, width, height, 20, 20);
+        graphics.setStroke(Color.web("#53657a", 0.9));
+        graphics.setLineWidth(1.2);
+        graphics.strokeRoundRect(0.6, 0.6, width - 1.2, height - 1.2, 20, 20);
+
+        graphics.setFont(Font.font("IBM Plex Mono", 11));
+        graphics.setTextAlign(TextAlignment.CENTER);
+        graphics.setFill(WHITE);
+        graphics.fillText("SAME 8 TASKS · SAME synchronized WAIT · DIFFERENT JDK", width / 2, 23);
+        graphics.setStroke(Color.web("#26364a"));
+        graphics.strokeLine(width / 2, 38, width / 2, height - 15);
+
+        drawShowdownPanel(graphics, 16, 42, 356, race, false);
+        drawShowdownPanel(graphics, 388, 42, 356, race, true);
+        jdkShowdownCanvas.setAccessibleText("JDK showdown. JDK 21 has " + race.jdk21Completed()
+                + " tasks completed and " + race.jdk21Queued() + " queued; JDK 25 has "
+                + race.jdk25Completed() + " completed and " + race.jdk25Queued() + " queued.");
+    }
+
+    private void drawShowdownPanel(GraphicsContext graphics, double x, double y, double width,
+            Sim.JdkShowdown race, boolean modern) {
+        Color accent = modern ? PURPLE : RED;
+        int completed = modern ? race.jdk25Completed() : race.jdk21Completed();
+        int queued = modern ? race.jdk25Queued() : race.jdk21Queued();
+        boolean blocked = modern ? race.jdk25Parked() : race.jdk21Pinned();
+        graphics.setFill(Color.web(modern ? "#15122b" : "#251011", 0.88));
+        graphics.fillRoundRect(x, y, width, 190, 14, 14);
+        graphics.setStroke(accent);
+        graphics.setLineWidth(blocked ? 2.2 : 1.1);
+        graphics.strokeRoundRect(x + 0.5, y + 0.5, width - 1, 189, 14, 14);
+
+        graphics.setTextAlign(TextAlignment.LEFT);
+        graphics.setFont(Font.font("IBM Plex Mono", 15));
+        graphics.setFill(accent);
+        graphics.fillText(modern ? "JDK 25" : "JDK 21", x + 15, y + 24);
+        graphics.setFont(Font.font("IBM Plex Mono", 10));
+        graphics.setFill(Color.web("#b6c6d8"));
+        graphics.fillText(modern ? "UNMOUNT · CARRIER REUSED" : "PIN · CARRIER RETAINED", x + 15, y + 41);
+
+        double laneY = y + 92;
+        graphics.setStroke(Color.web("#24425f"));
+        graphics.setLineWidth(8);
+        graphics.strokeLine(x + 20, laneY, x + width - 20, laneY);
+        graphics.setStroke(accent);
+        graphics.setLineWidth(2);
+        graphics.strokeLine(x + 20, laneY, x + width - 20, laneY);
+
+        graphics.setFill(Color.web("#1a2735"));
+        graphics.fillRoundRect(x + 178, laneY - 18, 58, 36, 9, 9);
+        graphics.setStroke(blocked && !modern ? RED : BLUE);
+        graphics.strokeRoundRect(x + 178, laneY - 18, 58, 36, 9, 9);
+        graphics.setFill(blocked && !modern ? RED : BLUE);
+        graphics.fillText(blocked && !modern ? "PINNED" : "CARRIER", x + 184, laneY + 4);
+
+        for (int i = 0; i < queued; i++) {
+            double dotX = x + 25 + (i % 8) * 17;
+            double dotY = laneY + 38 + (i / 8) * 16;
+            graphics.setFill(i == 0 ? accent : Color.web("#53657a"));
+            graphics.fillOval(dotX, dotY, 9, 9);
+        }
+
+        if (blocked && !modern) {
+            double shake = Math.sin(race.elapsed() * 12) * 2;
+            graphics.setFill(RED);
+            graphics.fillOval(x + 196 + shake, laneY - 38, 22, 22);
+            graphics.setStroke(Color.web("#fecaca"));
+            graphics.strokeOval(x + 196 + shake, laneY - 38, 22, 22);
+        } else if (blocked) {
+            double lift = Math.min(1, Math.max(0, (race.elapsed() - 0.75) / 0.7));
+            double parkedY = laneY - 32 - lift * 36;
+            graphics.setFill(PURPLE);
+            graphics.fillOval(x + 272, parkedY, 22, 22);
+            graphics.setStroke(Color.web("#ddd6fe"));
+            graphics.strokeOval(x + 272, parkedY, 22, 22);
+            graphics.setFill(Color.web("#8ea2b8"));
+            graphics.fillText("HEAP", x + 306, parkedY + 15);
+            double workingX = x + 184 + ((race.elapsed() * 54) % 38);
+            graphics.setFill(BLUE);
+            graphics.fillOval(workingX, laneY - 9, 18, 18);
+        }
+
+        graphics.setTextAlign(TextAlignment.LEFT);
+        graphics.setFont(Font.font("IBM Plex Mono", 11));
+        graphics.setFill(WHITE);
+        graphics.fillText(completed + " COMPLETED", x + 18, y + 151);
+        graphics.setFill(Color.web("#8ea2b8"));
+        graphics.fillText(queued + " QUEUED", x + 238, y + 151);
+        double progress = completed / (double) race.totalTasks();
+        graphics.setFill(Color.web("#1a2735"));
+        graphics.fillRoundRect(x + 18, y + 164, width - 36, 10, 5, 5);
+        graphics.setFill(modern ? GREEN : RED);
+        graphics.fillRoundRect(x + 18, y + 164, (width - 36) * progress, 10, 5, 5);
+    }
+
     private void syncResourcePool() {
         boolean visible = displayScenario() == Sim.Scenario.RESOURCE_POOL;
         Sim.ResourcePoolStats pool = displayResourcePoolStats();
@@ -1551,6 +1662,9 @@ public final class MachineScene extends StackPane {
     private boolean displayLiveMode() { return replayFrame == null ? sim.liveMode() : replayFrame.liveMode(); }
     private Sim.JdkComparison displayJdkComparison() {
         return replayFrame == null ? sim.jdkComparison() : replayFrame.jdkComparison();
+    }
+    private Sim.JdkShowdown displayJdkShowdown() {
+        return replayFrame == null ? sim.jdkShowdown() : replayFrame.jdkShowdown();
     }
     private Sim.Stats displayStats() { return replayFrame == null ? sim.stats() : replayFrame.stats(); }
     private Sim.Scenario displayScenario() {

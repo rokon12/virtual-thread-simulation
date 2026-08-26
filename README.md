@@ -60,6 +60,11 @@ expose ordinary virtual-thread carrier identity.
   the same `synchronized` blocking operation on JDK 21 and JDK 25, change speed,
   restart with new demo settings, or open the About dialog
 
+`Showdown` runs both JDK behaviors simultaneously with the same eight-task
+queue. The JDK 21 lane retains a red pinned carrier while the JDK 25 lane parks
+the blocker and continues completing work, making the throughput difference
+visible without switching back and forth.
+
 The sidebar includes live total, carrier utilization, average I/O, event-log
 highlighting, and a rolling completions/second chart. `AUTO` render quality
 hides nonessential glows when frame rate drops or the task pool becomes dense.
