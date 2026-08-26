@@ -104,7 +104,9 @@ public final class MachineScene extends StackPane {
     private final CameraRig camera = new CameraRig();
     private final Label tooltip = new Label();
     private final HBox cameraButtons;
+    private final HBox presentationButtons;
     private final Button cinematicButton = new Button("CINEMA ON");
+    private final Button soundButton = new Button("SOUND OFF");
     private final Label shortcut;
     private final Label diagnostics = new Label("-- FPS · AUTO/HIGH");
     private final Label followTitle = new Label();
@@ -141,6 +143,7 @@ public final class MachineScene extends StackPane {
     private final EnumMap<VtColor, PhongMaterial> materials = new EnumMap<>(VtColor.class);
     private final EnumMap<VtColor, PhongMaterial> glowMaterials = new EnumMap<>(VtColor.class);
     private final EnumMap<Sim.IoDevice, Vec3> ioEndpoints = new EnumMap<>(Sim.IoDevice.class);
+    private final EnumMap<Sim.Flash, Double> lastSoundEventTimes = new EnumMap<>(Sim.Flash.class);
     private final List<PhongMaterial> coreHeatMaterials = new ArrayList<>();
 
     private final PhongMaterial idleSlot = material(Color.web("#24425f"));
@@ -158,6 +161,7 @@ public final class MachineScene extends StackPane {
     private final PhongMaterial resourceLinkMaterial = transparentMaterial(GREEN, 0.55);
     private final PhongMaterial resourceIdleMaterial = material(Color.web("#26364a"));
     private final PhongMaterial resourceActiveMaterial = material(GREEN);
+    private final Soundscape soundscape = new Soundscape();
 
     private TorusMesh schedulerRing;
     private Box queuePressureBar;
@@ -185,6 +189,7 @@ public final class MachineScene extends StackPane {
     private SpotlightType spotlightType;
     private double spotlightElapsed = Double.POSITIVE_INFINITY;
     private double lastSpotlightEventTime = -99;
+    private int lastSoundCompleted;
 
     public MachineScene(Sim sim) {
         this.sim = sim;
@@ -245,17 +250,20 @@ public final class MachineScene extends StackPane {
         buildTrail();
 
         cameraButtons = buildCameraButtons();
-        shortcut = new Label("SPACE play/pause · J/K replay · L live · ← → chapters · C cinema · P present · A auto · N notes");
+        presentationButtons = buildPresentationButtons();
+        shortcut = new Label("SPACE play/pause · J/K replay · L live · ← → chapters · C cinema · M sound · P present · A auto · N notes");
         shortcut.getStyleClass().add("shortcut-hint");
         shortcut.setMouseTransparent(true);
         diagnostics.getStyleClass().add("diagnostics-label");
         diagnostics.setMouseTransparent(true);
 
-        getChildren().addAll(subScene, terminationCanvas, labelOverlay, cameraButtons, shortcut,
+        getChildren().addAll(subScene, terminationCanvas, labelOverlay, cameraButtons, presentationButtons, shortcut,
                 diagnostics, spotlightCanvas, continuationCanvas, comparisonOverlay,
                 lessonCanvas, jdkShowdownCanvas, consequenceCanvas, followOverlay);
         StackPane.setAlignment(cameraButtons, Pos.TOP_RIGHT);
         StackPane.setMargin(cameraButtons, new Insets(14, 16, 0, 0));
+        StackPane.setAlignment(presentationButtons, Pos.TOP_RIGHT);
+        StackPane.setMargin(presentationButtons, new Insets(52, 16, 0, 0));
         StackPane.setAlignment(shortcut, Pos.BOTTOM_RIGHT);
         StackPane.setMargin(shortcut, new Insets(0, 16, 16, 0));
         StackPane.setAlignment(diagnostics, Pos.TOP_LEFT);
@@ -791,10 +799,20 @@ public final class MachineScene extends StackPane {
             button.setOnAction(event -> camera.toPreset(preset));
             bar.getChildren().add(button);
         }
+        return bar;
+    }
+
+    private HBox buildPresentationButtons() {
+        HBox bar = new HBox(6);
+        bar.getStyleClass().add("camera-buttons");
+        bar.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
         cinematicButton.getStyleClass().addAll("camera-button", "cinematic-button");
         cinematicButton.setAccessibleText("Toggle cinematic event spotlight and slow motion");
         cinematicButton.setOnAction(event -> toggleCinematic());
-        bar.getChildren().add(cinematicButton);
+        soundButton.getStyleClass().addAll("camera-button", "sound-button", "sound-disabled");
+        soundButton.setAccessibleText("Enable optional presentation sound effects");
+        soundButton.setOnAction(event -> toggleSound());
+        bar.getChildren().addAll(cinematicButton, soundButton);
         return bar;
     }
 
@@ -901,6 +919,7 @@ public final class MachineScene extends StackPane {
         syncTerminationEffects();
         syncCinematicSpotlight(dt);
         syncContinuationXray();
+        syncSoundscape();
         drawConsequenceMeter();
         syncFollowOverlay();
         syncComparisonOverlay();
@@ -1560,6 +1579,27 @@ public final class MachineScene extends StackPane {
                         stats.pinnedThreadSeconds(), stats.parkedThreadSeconds()));
     }
 
+    private void syncSoundscape() {
+        if (!soundscape.enabled() || replayFrame != null) return;
+        for (Sim.Flash flash : Sim.Flash.values()) {
+            double age = displayFlashAge(flash);
+            double eventTime = displayTime() - age;
+            double lastEvent = lastSoundEventTimes.getOrDefault(flash, -99.0);
+            if (age <= 0.16 && eventTime > lastEvent + 0.04) {
+                soundscape.play(switch (flash) {
+                    case MOUNT -> Soundscape.Cue.MOUNT;
+                    case PARK -> Soundscape.Cue.PARK;
+                    case RESUME -> Soundscape.Cue.RESUME;
+                    case PIN -> Soundscape.Cue.PIN;
+                });
+                lastSoundEventTimes.put(flash, eventTime);
+            }
+        }
+        int completed = displayStats().completed();
+        if (completed > lastSoundCompleted) soundscape.play(Soundscape.Cue.COMPLETE);
+        lastSoundCompleted = completed;
+    }
+
     private void syncJdkShowdown() {
         Sim.JdkShowdown race = displayJdkShowdown();
         jdkShowdownCanvas.setVisible(race.active());
@@ -1949,6 +1989,8 @@ public final class MachineScene extends StackPane {
     public void setPresenterMode(boolean presenter) {
         cameraButtons.setVisible(!presenter);
         cameraButtons.setManaged(!presenter);
+        presentationButtons.setVisible(!presenter);
+        presentationButtons.setManaged(!presenter);
         shortcut.setVisible(!presenter);
         shortcut.setManaged(!presenter);
     }
@@ -2046,6 +2088,27 @@ public final class MachineScene extends StackPane {
         if (spotlightElapsed <= 0.85) return 0.28;
         return 0.28 + 0.72 * ((spotlightElapsed - 0.85) / 0.8);
     }
+
+    public boolean toggleSound() {
+        boolean enabled = soundscape.toggle();
+        soundButton.setText(enabled ? "SOUND ON" : "SOUND OFF");
+        soundButton.getStyleClass().remove("sound-disabled");
+        if (!enabled) soundButton.getStyleClass().add("sound-disabled");
+        soundButton.setAccessibleText(enabled
+                ? "Disable presentation sound effects" : "Enable optional presentation sound effects");
+        lastSoundCompleted = displayStats().completed();
+        for (Sim.Flash flash : Sim.Flash.values()) {
+            lastSoundEventTimes.put(flash, displayTime() - displayFlashAge(flash));
+        }
+        if (replayFrame == null) {
+            sim.recordMessage(enabled ? "presentation sound enabled"
+                    : "presentation sound disabled or unavailable");
+        }
+        requestFocus();
+        return enabled;
+    }
+
+    public void close() { soundscape.close(); }
 
     private boolean replayFramePresent() { return replayFrame != null; }
 

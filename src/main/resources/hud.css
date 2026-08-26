@@ -240,6 +240,16 @@
     -fx-effect: none;
 }
 
+.sound-button {
+    -fx-border-color: #34d399;
+    -fx-text-fill: #6ee7b7;
+}
+
+.sound-button.sound-disabled {
+    -fx-border-color: #344153;
+    -fx-text-fill: #718399;
+}
+
 .shortcut-hint {
     -fx-font-family: "IBM Plex Mono";
     -fx-font-size: 10px;

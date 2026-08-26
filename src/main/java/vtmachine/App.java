@@ -116,6 +116,7 @@ public final class App extends Application {
             liveWorkload.close();
             liveWorkload = null;
         }
+        if (machine != null) machine.close();
         settings = replacement;
         replaying = false;
         replayPlaying = false;
@@ -266,6 +267,7 @@ public final class App extends Application {
                 }
                 case H -> setHighContrast(!highContrast);
                 case C -> machine.toggleCinematic();
+                case M -> machine.toggleSound();
                 case N -> speakerNotes.toggle();
                 case J -> {
                     int start = replaying ? replayIndex : replayTimeline.size() - 1;
@@ -497,6 +499,7 @@ public final class App extends Application {
     public void stop() {
         if (timer != null) timer.stop();
         if (liveWorkload != null) liveWorkload.close();
+        if (machine != null) machine.close();
         if (speakerNotes != null) speakerNotes.close();
     }
 

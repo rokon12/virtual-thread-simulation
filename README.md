@@ -45,6 +45,7 @@ expose ordinary virtual-thread carrier identity.
 - `Q`: cycle automatic, high, and low render quality
 - `H`: toggle high-contrast mode
 - `C`: toggle cinematic event spotlight and slow motion
+- `M`: mute or enable optional presentation sound cues
 - `N`: toggle the second-screen speaker-notes window
 - `J` / `K`: step backward or forward through recorded history
 - `L`: leave replay and return to the untouched live simulation
@@ -80,6 +81,11 @@ A live consequence meter anchors the lower-right presentation view. It reports
 free carriers, run-queue pressure, completed tasks, and cumulative pinned versus
 parked VT-seconds. The latter are aggregate thread-seconds, so ten VTs parked
 for one second contribute ten parked VT-seconds.
+
+Presentation sound starts muted. Enable `SOUND ON` or press `M` for short,
+locally synthesized mount, park, resume, pin-warning, and completion cues. The
+cues require no media files or network access and automatically remain disabled
+if the operating system has no available audio output line.
 
 The sidebar includes live total, carrier utilization, average I/O, event-log
 highlighting, and a rolling completions/second chart. `AUTO` render quality

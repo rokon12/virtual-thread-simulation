@@ -102,7 +102,7 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 | Right sidebar 290px | Counters include RUNNABLE, MOUNTED, PARKED, COMPLETED, live total, and utilization · task-profile mix · throughput graph · 4 behavior cards · event log, 7 clickable mono lines |
 | Narration card | Bottom-left 400px overlay: CHAPTER n/10, colored title, body text, ←/Next buttons. Chapter copy: §10 verbatim |
 | Bottom bar | Pause/Run · +25 tasks · Force park · JDK 21 · JDK 25 · Showdown · replay scrubber with marker rail and LIVE return · speed Slider + readout "0.75×" |
-| Keyboard | SPACE live/replay play-pause · J/K history step · L return live · C cinematic spotlight · ←/→ chapters (or slider step while focused) · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480) |
+| Keyboard | SPACE live/replay play-pause · J/K history step · L return live · C cinematic spotlight · M sound mute · ←/→ chapters (or slider step while focused) · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480) |
 | Hover / follow | PickResult on the VT pool → tooltip; click a VT or log line to pin a lifecycle card showing RUNNABLE / MOUNTED / PARKED / TERMINATED durations |
 
 Type: Space Grotesk (UI) + IBM Plex Mono (data). Ship both as bundled TTFs via `Font.loadFont` — don't depend on system fonts on the conference machine.
@@ -223,6 +223,11 @@ A 620×84 lower-right consequence meter reads from model-owned counters. It
 shows free carriers, runnable queue pressure, completed tasks, and cumulative
 pinned/parked VT-seconds. Each tick adds `pinnedCarriers × dt` and
 `parkedVirtualThreads × dt`, making the cost comparison quantitative and replay-safe.
+
+Optional sound starts muted and is controlled by `M` or `SOUND OFF/ON`. Five
+short PCM cues are synthesized locally at 44.1 kHz for mount, park, resume, pin,
+and completion; no external media is loaded. Audio-line failure leaves the
+feature disabled without affecting the simulation or snapshot workflow.
 
 ## 7 · Project Setup
 
