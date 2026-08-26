@@ -31,7 +31,10 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
+import javafx.scene.paint.CycleMethod;
 import javafx.scene.paint.PhongMaterial;
+import javafx.scene.paint.RadialGradient;
+import javafx.scene.paint.Stop;
 import javafx.scene.shape.Box;
 import javafx.scene.shape.CullFace;
 import javafx.scene.shape.Cylinder;
@@ -57,6 +60,20 @@ public final class MachineScene extends StackPane {
     private static final Color WHITE = Color.web("#e6edf3");
 
     private enum VtColor { GREEN, BLUE, PURPLE, AMBER, RED, WHITE }
+    private enum SpotlightType {
+        MOUNT("VT MOUNTED · CARRIER BUSY", BLUE),
+        PARK("VT PARKED · CARRIER RELEASED", PURPLE),
+        RESUME("CONTINUATION RESUMED · ANY CARRIER", GREEN),
+        PIN("VT PINNED · CARRIER RETAINED", RED);
+
+        final String callout;
+        final Color color;
+
+        SpotlightType(String callout, Color color) {
+            this.callout = callout;
+            this.color = color;
+        }
+    }
     public enum Quality { AUTO, HIGH, LOW }
     private enum AnchorAlignment { CENTER, RIGHT }
     private record ProjectedLabel(Group anchor, Label label, AnchorAlignment alignment) {}
@@ -81,9 +98,11 @@ public final class MachineScene extends StackPane {
     private final Canvas terminationCanvas = new Canvas();
     private final Canvas lessonCanvas = new Canvas(680, 168);
     private final Canvas jdkShowdownCanvas = new Canvas(760, 250);
+    private final Canvas spotlightCanvas = new Canvas();
     private final CameraRig camera = new CameraRig();
     private final Label tooltip = new Label();
     private final HBox cameraButtons;
+    private final Button cinematicButton = new Button("CINEMA ON");
     private final Label shortcut;
     private final Label diagnostics = new Label("-- FPS · AUTO/HIGH");
     private final Label followTitle = new Label();
@@ -160,6 +179,10 @@ public final class MachineScene extends StackPane {
     private boolean autoLow;
     private boolean highContrast;
     private double lastGearDisplayTime = Double.NaN;
+    private boolean cinematicEnabled = true;
+    private SpotlightType spotlightType;
+    private double spotlightElapsed = Double.POSITIVE_INFINITY;
+    private double lastSpotlightEventTime = -99;
 
     public MachineScene(Sim sim) {
         this.sim = sim;
@@ -188,6 +211,10 @@ public final class MachineScene extends StackPane {
         jdkShowdownCanvas.setMouseTransparent(true);
         jdkShowdownCanvas.setAccessibleRole(AccessibleRole.TEXT);
         jdkShowdownCanvas.setVisible(false);
+        spotlightCanvas.setMouseTransparent(true);
+        spotlightCanvas.widthProperty().bind(widthProperty());
+        spotlightCanvas.heightProperty().bind(heightProperty());
+        spotlightCanvas.setVisible(false);
         tooltip.getStyleClass().add("vt-tooltip");
         tooltip.setManaged(false);
         tooltip.setVisible(false);
@@ -209,14 +236,14 @@ public final class MachineScene extends StackPane {
         buildTrail();
 
         cameraButtons = buildCameraButtons();
-        shortcut = new Label("SPACE play/pause · J/K replay · L live · ← → chapters · P present · A auto · N notes");
+        shortcut = new Label("SPACE play/pause · J/K replay · L live · ← → chapters · C cinema · P present · A auto · N notes");
         shortcut.getStyleClass().add("shortcut-hint");
         shortcut.setMouseTransparent(true);
         diagnostics.getStyleClass().add("diagnostics-label");
         diagnostics.setMouseTransparent(true);
 
         getChildren().addAll(subScene, terminationCanvas, labelOverlay, cameraButtons, shortcut,
-                diagnostics, comparisonOverlay, lessonCanvas, jdkShowdownCanvas, followOverlay);
+                diagnostics, spotlightCanvas, comparisonOverlay, lessonCanvas, jdkShowdownCanvas, followOverlay);
         StackPane.setAlignment(cameraButtons, Pos.TOP_RIGHT);
         StackPane.setMargin(cameraButtons, new Insets(14, 16, 0, 0));
         StackPane.setAlignment(shortcut, Pos.BOTTOM_RIGHT);
@@ -751,6 +778,10 @@ public final class MachineScene extends StackPane {
             button.setOnAction(event -> camera.toPreset(preset));
             bar.getChildren().add(button);
         }
+        cinematicButton.getStyleClass().addAll("camera-button", "cinematic-button");
+        cinematicButton.setAccessibleText("Toggle cinematic event spotlight and slow motion");
+        cinematicButton.setOnAction(event -> toggleCinematic());
+        bar.getChildren().add(cinematicButton);
         return bar;
     }
 
@@ -855,6 +886,7 @@ public final class MachineScene extends StackPane {
         syncHero();
         syncParkedBadges();
         syncTerminationEffects();
+        syncCinematicSpotlight(dt);
         syncFollowOverlay();
         syncComparisonOverlay();
         syncJdkShowdown();
@@ -1249,6 +1281,107 @@ public final class MachineScene extends StackPane {
                 + " parked · " + waiting + " queued");
         comparisonPinValue.setText("carrier retained\n" + pinned
                 + " pinned · " + waiting + " queued");
+    }
+
+    private void syncCinematicSpotlight(double dt) {
+        boolean eligible = cinematicEnabled && replayFrame == null && !displayFreeRun()
+                && displayScenario() == Sim.Scenario.NONE && !displayJdkShowdown().active();
+        if (!eligible) {
+            spotlightCanvas.setVisible(false);
+            spotlightElapsed = Double.POSITIVE_INFINITY;
+            return;
+        }
+
+        spotlightElapsed += Math.max(0, dt);
+        SpotlightType newest = null;
+        double newestAge = Double.POSITIVE_INFINITY;
+        for (SpotlightType candidate : new SpotlightType[] {
+                SpotlightType.PIN, SpotlightType.PARK, SpotlightType.RESUME, SpotlightType.MOUNT }) {
+            double age = displayFlashAge(Sim.Flash.valueOf(candidate.name()));
+            if (age < newestAge) {
+                newestAge = age;
+                newest = candidate;
+            }
+        }
+        double eventTime = displayTime() - newestAge;
+        if (newest != null && newestAge <= 0.18 && eventTime > lastSpotlightEventTime + 0.05
+                && spotlightElapsed > 1.05) {
+            spotlightType = newest;
+            spotlightElapsed = 0;
+            lastSpotlightEventTime = eventTime;
+        }
+
+        if (spotlightType == null || spotlightElapsed > 1.85) {
+            spotlightCanvas.setVisible(false);
+            return;
+        }
+        ThreadView target = spotlightTarget(spotlightType);
+        double centerX = getWidth() * 0.5;
+        double centerY = getHeight() * 0.48;
+        if (target != null) {
+            Point3D scenePoint = world.localToScene(target.x(), target.y(), target.z(), true);
+            Point3D local = spotlightCanvas.sceneToLocal(scenePoint);
+            if (Double.isFinite(local.getX()) && Double.isFinite(local.getY())) {
+                centerX = local.getX();
+                centerY = local.getY();
+            }
+        }
+        drawSpotlight(centerX, centerY);
+    }
+
+    private ThreadView spotlightTarget(SpotlightType type) {
+        return displayVts().stream().filter(vt -> switch (type) {
+            case PIN -> vt.carrierPinned();
+            case PARK -> vt.state() == Sim.VtState.PARKING || vt.state() == Sim.VtState.PARKED;
+            case RESUME -> vt.resumed() && switch (vt.state()) {
+                case TO_QUEUE, QUEUED, MOUNTING, RUNNING -> true;
+                default -> false;
+            };
+            case MOUNT -> vt.state() == Sim.VtState.MOUNTING || vt.state() == Sim.VtState.RUNNING;
+        }).min((first, second) -> Double.compare(first.lifecycleAge(displayTime()),
+                second.lifecycleAge(displayTime()))).orElse(null);
+    }
+
+    private void drawSpotlight(double centerX, double centerY) {
+        GraphicsContext graphics = spotlightCanvas.getGraphicsContext2D();
+        double width = spotlightCanvas.getWidth();
+        double height = spotlightCanvas.getHeight();
+        graphics.clearRect(0, 0, width, height);
+        double fadeIn = clamp(spotlightElapsed / 0.18, 0, 1);
+        double fadeOut = clamp((1.85 - spotlightElapsed) / 0.35, 0, 1);
+        double alpha = Math.min(fadeIn, fadeOut);
+        double radius = 76 + Math.sin(spotlightElapsed * 7) * 5;
+        double fadeRadius = Math.max(width, height);
+        graphics.setFill(new RadialGradient(0, 0, centerX, centerY, fadeRadius, false,
+                CycleMethod.NO_CYCLE,
+                new Stop(0, Color.TRANSPARENT),
+                new Stop(Math.min(0.95, radius / fadeRadius), Color.TRANSPARENT),
+                new Stop(Math.min(0.98, (radius + 75) / fadeRadius), Color.web("#02050a", 0.58 * alpha)),
+                new Stop(1, Color.web("#02050a", 0.58 * alpha))));
+        graphics.fillRect(0, 0, width, height);
+        graphics.setStroke(spotlightType.color.deriveColor(0, 1, 1, alpha));
+        graphics.setLineWidth(3);
+        graphics.strokeOval(centerX - radius, centerY - radius, radius * 2, radius * 2);
+        graphics.setStroke(spotlightType.color.deriveColor(0, 1, 1, alpha * 0.35));
+        graphics.setLineWidth(9);
+        graphics.strokeOval(centerX - radius - 7, centerY - radius - 7,
+                radius * 2 + 14, radius * 2 + 14);
+
+        double calloutWidth = 322;
+        double calloutX = clamp(centerX - calloutWidth / 2, 12, Math.max(12, width - calloutWidth - 12));
+        double calloutY = centerY - radius - 55;
+        if (calloutY < 12) calloutY = centerY + radius + 16;
+        graphics.setFill(Color.web("#08111d", 0.96 * alpha));
+        graphics.fillRoundRect(calloutX, calloutY, calloutWidth, 38, 11, 11);
+        graphics.setStroke(spotlightType.color.deriveColor(0, 1, 1, alpha));
+        graphics.setLineWidth(1.5);
+        graphics.strokeRoundRect(calloutX + 0.5, calloutY + 0.5, calloutWidth - 1, 37, 11, 11);
+        graphics.setFill(spotlightType.color.deriveColor(0, 1, 1, alpha));
+        graphics.setTextAlign(TextAlignment.CENTER);
+        graphics.setFont(Font.font("IBM Plex Mono", 12));
+        graphics.fillText(spotlightType.callout, calloutX + calloutWidth / 2, calloutY + 24);
+        spotlightCanvas.setAccessibleText(spotlightType.callout + ". Cinematic slow motion active.");
+        spotlightCanvas.setVisible(true);
     }
 
     private void syncJdkShowdown() {
@@ -1666,6 +1799,10 @@ public final class MachineScene extends StackPane {
     private Sim.JdkShowdown displayJdkShowdown() {
         return replayFrame == null ? sim.jdkShowdown() : replayFrame.jdkShowdown();
     }
+    private double displayFlashAge(Sim.Flash flash) {
+        return replayFrame == null ? sim.flashAge(flash)
+                : replayFrame.flashAges().getOrDefault(flash, Double.POSITIVE_INFINITY);
+    }
     private Sim.Stats displayStats() { return replayFrame == null ? sim.stats() : replayFrame.stats(); }
     private Sim.Scenario displayScenario() {
         return replayFrame == null ? sim.scenario() : replayFrame.scenario();
@@ -1707,6 +1844,31 @@ public final class MachineScene extends StackPane {
     public void cameraPreset(CameraRig.Preset preset) {
         camera.toPreset(preset);
     }
+
+    public boolean toggleCinematic() {
+        cinematicEnabled = !cinematicEnabled;
+        cinematicButton.setText(cinematicEnabled ? "CINEMA ON" : "CINEMA OFF");
+        cinematicButton.getStyleClass().remove("cinematic-disabled");
+        if (!cinematicEnabled) {
+            cinematicButton.getStyleClass().add("cinematic-disabled");
+            spotlightCanvas.setVisible(false);
+            spotlightElapsed = Double.POSITIVE_INFINITY;
+        }
+        if (!replayFramePresent()) {
+            sim.recordMessage("cinematic spotlight " + (cinematicEnabled ? "enabled" : "disabled"));
+        }
+        requestFocus();
+        return cinematicEnabled;
+    }
+
+    public double cinematicTimeScale() {
+        if (!cinematicEnabled || replayFrame != null || !Double.isFinite(spotlightElapsed)
+                || spotlightElapsed >= 1.65) return 1;
+        if (spotlightElapsed <= 0.85) return 0.28;
+        return 0.28 + 0.72 * ((spotlightElapsed - 0.85) / 0.8);
+    }
+
+    private boolean replayFramePresent() { return replayFrame != null; }
 
     public void cameraForChapter(int chapter) {
         camera.toPreset(switch (Math.floorMod(chapter, Sim.CHAPTER_COUNT)) {

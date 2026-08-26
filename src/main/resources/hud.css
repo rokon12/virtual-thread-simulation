@@ -228,6 +228,18 @@
     -fx-text-fill: #d6e5f4;
 }
 
+.cinematic-button {
+    -fx-border-color: #f5b84c;
+    -fx-text-fill: #ffd275;
+    -fx-effect: dropshadow(gaussian, rgba(245,184,76,0.28), 7, 0.2, 0, 0);
+}
+
+.cinematic-button.cinematic-disabled {
+    -fx-border-color: #344153;
+    -fx-text-fill: #718399;
+    -fx-effect: none;
+}
+
 .shortcut-hint {
     -fx-font-family: "IBM Plex Mono";
     -fx-font-size: 10px;

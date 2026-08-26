@@ -102,7 +102,7 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 | Right sidebar 290px | Counters include RUNNABLE, MOUNTED, PARKED, COMPLETED, live total, and utilization · task-profile mix · throughput graph · 4 behavior cards · event log, 7 clickable mono lines |
 | Narration card | Bottom-left 400px overlay: CHAPTER n/10, colored title, body text, ←/Next buttons. Chapter copy: §10 verbatim |
 | Bottom bar | Pause/Run · +25 tasks · Force park · JDK 21 · JDK 25 · Showdown · replay scrubber with marker rail and LIVE return · speed Slider + readout "0.75×" |
-| Keyboard | SPACE live/replay play-pause · J/K history step · L return live · ←/→ chapters (or slider step while focused) · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480) |
+| Keyboard | SPACE live/replay play-pause · J/K history step · L return live · C cinematic spotlight · ←/→ chapters (or slider step while focused) · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480) |
 | Hover / follow | PickResult on the VT pool → tooltip; click a VT or log line to pin a lifecycle card showing RUNNABLE / MOUNTED / PARKED / TERMINATED durations |
 
 Type: Space Grotesk (UI) + IBM Plex Mono (data). Ship both as bundled TTFs via `Font.loadFont` — don't depend on system fonts on the conference machine.
@@ -205,6 +205,13 @@ Virtual threads are final since Java 21 — no preview flags on 25. The two synt
 tasks on both sides. The JDK 21 lane retains its carrier for the five-second
 modeled wait; the JDK 25 lane moves the blocker to the heap and keeps completing
 queued work. Live completion and queue counters make the consequence visible.
+
+Guided mode enables a cinematic event layer by default. A new mount, park,
+resume, or pin briefly applies a 0.28× time scale, dims the scene outside a
+pulsing circular cutout around the responsible VT, and shows a causal callout.
+The effect eases back to normal over 1.65 seconds and can be toggled with `C` or
+the camera-bar `CINEMA ON/OFF` control. It stays off during replay, free-run,
+scenario lessons, and the JDK showdown so dense workloads remain legible.
 
 ## 7 · Project Setup
 

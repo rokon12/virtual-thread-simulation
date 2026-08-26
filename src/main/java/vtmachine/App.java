@@ -168,7 +168,7 @@ public final class App extends Application {
                 if (frameDt > 0) fps += (1 / frameDt - fps) * 0.075;
                 if (liveWorkload != null) liveWorkload.tick(frameDt, sim.running() && sim.freeRun());
                 if (sim.running()) {
-                    accumulator += frameDt * sim.speed();
+                    accumulator += frameDt * sim.speed() * machine.cinematicTimeScale();
                     while (accumulator >= FIXED_STEP) {
                         sim.tick(FIXED_STEP);
                         accumulator -= FIXED_STEP;
@@ -265,6 +265,7 @@ public final class App extends Application {
                     if (!replaying) sim.recordMessage("render quality: " + quality);
                 }
                 case H -> setHighContrast(!highContrast);
+                case C -> machine.toggleCinematic();
                 case N -> speakerNotes.toggle();
                 case J -> {
                     int start = replaying ? replayIndex : replayTimeline.size() - 1;

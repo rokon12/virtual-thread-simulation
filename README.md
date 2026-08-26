@@ -44,6 +44,7 @@ expose ordinary virtual-thread carrier identity.
 - `R`: replay the current chapter
 - `Q`: cycle automatic, high, and low render quality
 - `H`: toggle high-contrast mode
+- `C`: toggle cinematic event spotlight and slow motion
 - `N`: toggle the second-screen speaker-notes window
 - `J` / `K`: step backward or forward through recorded history
 - `L`: leave replay and return to the untouched live simulation
@@ -64,6 +65,11 @@ expose ordinary virtual-thread carrier identity.
 queue. The JDK 21 lane retains a red pinned carrier while the JDK 25 lane parks
 the blocker and continues completing work, making the throughput difference
 visible without switching back and forth.
+
+Cinematic mode is enabled by default in guided demonstrations. Important mount,
+park, resume, and pin events briefly slow the model, dim the surrounding scene,
+and spotlight the responsible VT with a large causal callout. Use `C` or the
+`CINEMA ON/OFF` camera-bar control to disable it for uninterrupted workloads.
 
 The sidebar includes live total, carrier utilization, average I/O, event-log
 highlighting, and a rolling completions/second chart. `AUTO` render quality
