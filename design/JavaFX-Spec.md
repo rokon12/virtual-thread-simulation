@@ -213,6 +213,12 @@ The effect eases back to normal over 1.65 seconds and can be toggled with `C` or
 the camera-bar `CINEMA ON/OFF` control. It stays off during replay, free-run,
 scenario lessons, and the JDK showdown so dense workloads remain legible.
 
+Guided park/resume transitions also expose a reusable 2D continuation X-ray.
+Three representative frames (`handleRequest`, application data loading, and a
+device-specific blocking frame) compress into a compact heap-backed
+continuation during the 0.85-second park tween. The compact continuation follows
+the VT through heap and queue, then expands during the 0.55-second mount tween.
+
 ## 7 · Project Setup
 
 ```xml

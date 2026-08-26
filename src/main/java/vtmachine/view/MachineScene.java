@@ -99,6 +99,7 @@ public final class MachineScene extends StackPane {
     private final Canvas lessonCanvas = new Canvas(680, 168);
     private final Canvas jdkShowdownCanvas = new Canvas(760, 250);
     private final Canvas spotlightCanvas = new Canvas();
+    private final Canvas continuationCanvas = new Canvas();
     private final CameraRig camera = new CameraRig();
     private final Label tooltip = new Label();
     private final HBox cameraButtons;
@@ -215,6 +216,11 @@ public final class MachineScene extends StackPane {
         spotlightCanvas.widthProperty().bind(widthProperty());
         spotlightCanvas.heightProperty().bind(heightProperty());
         spotlightCanvas.setVisible(false);
+        continuationCanvas.setMouseTransparent(true);
+        continuationCanvas.widthProperty().bind(widthProperty());
+        continuationCanvas.heightProperty().bind(heightProperty());
+        continuationCanvas.setAccessibleRole(AccessibleRole.TEXT);
+        continuationCanvas.setVisible(false);
         tooltip.getStyleClass().add("vt-tooltip");
         tooltip.setManaged(false);
         tooltip.setVisible(false);
@@ -243,7 +249,8 @@ public final class MachineScene extends StackPane {
         diagnostics.setMouseTransparent(true);
 
         getChildren().addAll(subScene, terminationCanvas, labelOverlay, cameraButtons, shortcut,
-                diagnostics, spotlightCanvas, comparisonOverlay, lessonCanvas, jdkShowdownCanvas, followOverlay);
+                diagnostics, spotlightCanvas, continuationCanvas, comparisonOverlay,
+                lessonCanvas, jdkShowdownCanvas, followOverlay);
         StackPane.setAlignment(cameraButtons, Pos.TOP_RIGHT);
         StackPane.setMargin(cameraButtons, new Insets(14, 16, 0, 0));
         StackPane.setAlignment(shortcut, Pos.BOTTOM_RIGHT);
@@ -887,6 +894,7 @@ public final class MachineScene extends StackPane {
         syncParkedBadges();
         syncTerminationEffects();
         syncCinematicSpotlight(dt);
+        syncContinuationXray();
         syncFollowOverlay();
         syncComparisonOverlay();
         syncJdkShowdown();
@@ -1382,6 +1390,103 @@ public final class MachineScene extends StackPane {
         graphics.fillText(spotlightType.callout, calloutX + calloutWidth / 2, calloutY + 24);
         spotlightCanvas.setAccessibleText(spotlightType.callout + ". Cinematic slow motion active.");
         spotlightCanvas.setVisible(true);
+    }
+
+    private void syncContinuationXray() {
+        boolean eligible = !displayFreeRun() && displayScenario() == Sim.Scenario.NONE
+                && !displayJdkShowdown().active();
+        if (!eligible) {
+            continuationCanvas.setVisible(false);
+            return;
+        }
+        ThreadView target = newestContinuationTarget();
+        if (target == null) {
+            continuationCanvas.setVisible(false);
+            return;
+        }
+        Point3D scenePoint = world.localToScene(target.x(), target.y(), target.z(), true);
+        Point3D local = continuationCanvas.sceneToLocal(scenePoint);
+        if (!Double.isFinite(local.getX()) || !Double.isFinite(local.getY())) {
+            continuationCanvas.setVisible(false);
+            return;
+        }
+        drawContinuationXray(target, local.getX(), local.getY());
+    }
+
+    private ThreadView newestContinuationTarget() {
+        ThreadView outbound = displayVts().stream()
+                .filter(vt -> (vt.state() == Sim.VtState.PARKING
+                        || vt.state() == Sim.VtState.PARKED && vt.lifecycleAge(displayTime()) < 2.4))
+                .min((first, second) -> Double.compare(first.lifecycleAge(displayTime()),
+                        second.lifecycleAge(displayTime()))).orElse(null);
+        if (outbound != null) return outbound;
+        return displayVts().stream().filter(vt -> vt.resumed() && switch (vt.state()) {
+            case TO_QUEUE, QUEUED, MOUNTING -> true;
+            case RUNNING -> vt.lifecycleAge(displayTime()) < 0.9;
+            default -> false;
+        }).min((first, second) -> Double.compare(first.lifecycleAge(displayTime()),
+                second.lifecycleAge(displayTime()))).orElse(null);
+    }
+
+    private void drawContinuationXray(ThreadView target, double centerX, double centerY) {
+        GraphicsContext graphics = continuationCanvas.getGraphicsContext2D();
+        graphics.clearRect(0, 0, continuationCanvas.getWidth(), continuationCanvas.getHeight());
+        double age = target.lifecycleAge(displayTime());
+        boolean outbound = target.state() == Sim.VtState.PARKING || target.state() == Sim.VtState.PARKED;
+        boolean rebuilding = target.state() == Sim.VtState.MOUNTING || target.state() == Sim.VtState.RUNNING;
+        double expansion = outbound ? 1 - clamp(age / 0.85, 0, 1)
+                : rebuilding ? clamp(age / 0.55, 0, 1) : 0;
+        double separation = 5 + expansion * 25;
+        double maxWidth = 208;
+        double compactWidth = 106;
+        double anchorX = clamp(centerX + 42, 12,
+                Math.max(12, continuationCanvas.getWidth() - maxWidth - 12));
+        double anchorY = clamp(centerY - 44, 72,
+                Math.max(72, continuationCanvas.getHeight() - 120));
+        String[] frames = continuationFrames(target.ioDevice());
+
+        graphics.setTextAlign(TextAlignment.LEFT);
+        graphics.setFont(Font.font("IBM Plex Mono", 10));
+        for (int i = 0; i < frames.length; i++) {
+            double cardWidth = compactWidth + (maxWidth - i * 15 - compactWidth) * expansion;
+            double cardY = anchorY + i * separation;
+            Color color = i == frames.length - 1 ? PURPLE : BLUE.interpolate(PURPLE, i * 0.28);
+            graphics.setFill(Color.web("#08111d", 0.95));
+            graphics.fillRoundRect(anchorX, cardY, cardWidth, 22, 6, 6);
+            graphics.setStroke(color);
+            graphics.setLineWidth(1.2);
+            graphics.strokeRoundRect(anchorX + 0.5, cardY + 0.5, cardWidth - 1, 21, 6, 6);
+            graphics.setFill(color);
+            String text = expansion > 0.48 ? frames[i] : i == 1 ? "CONTINUATION" : "";
+            graphics.fillText(text, anchorX + 8, cardY + 15);
+        }
+
+        double labelY = anchorY - 29;
+        String phase = outbound
+                ? expansion > 0.12 ? "STACK FRAMES COMPRESS → HEAP" : "HEAP-BACKED CONTINUATION"
+                : rebuilding ? "CONTINUATION EXPANDS → STACK FRAMES" : "CONTINUATION RETURNS VIA RUN QUEUE";
+        double labelWidth = 294;
+        graphics.setFill(Color.web("#08111d", 0.96));
+        graphics.fillRoundRect(anchorX - 6, labelY, labelWidth, 23, 7, 7);
+        graphics.setStroke(PURPLE);
+        graphics.strokeRoundRect(anchorX - 5.5, labelY + 0.5, labelWidth - 1, 22, 7, 7);
+        graphics.setFill(Color.web("#ddd6fe"));
+        graphics.fillText(phase, anchorX + 4, labelY + 16);
+        graphics.setStroke(Color.web("#a78bfa", 0.65));
+        graphics.strokeLine(centerX + 6, centerY, anchorX - 6, anchorY + 10);
+        continuationCanvas.setAccessibleText("Virtual thread " + target.id() + ". " + phase
+                + ". Frames: " + String.join(", ", frames));
+        continuationCanvas.setVisible(true);
+    }
+
+    private static String[] continuationFrames(Sim.IoDevice device) {
+        String blockingFrame = switch (device == null ? Sim.IoDevice.NETWORK : device) {
+            case NETWORK -> "Socket.read()";
+            case DISK -> "FileChannel.read()";
+            case TIMER -> "LockSupport.park()";
+            case DATABASE -> "JDBC.executeQuery()";
+        };
+        return new String[] { "handleRequest()", "loadApplicationData()", blockingFrame };
     }
 
     private void syncJdkShowdown() {

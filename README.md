@@ -71,6 +71,11 @@ park, resume, and pin events briefly slow the model, dim the surrounding scene,
 and spotlight the responsible VT with a large causal callout. Use `C` or the
 `CINEMA ON/OFF` camera-bar control to disable it for uninterrupted workloads.
 
+During a guided park, an X-ray overlay names representative Java frames such as
+`handleRequest()`, `loadApplicationData()`, and the active blocking call. The
+frames compress into a single heap-backed continuation, follow the VT through
+the heap and run queue, and expand again while it remounts.
+
 The sidebar includes live total, carrier utilization, average I/O, event-log
 highlighting, and a rolling completions/second chart. `AUTO` render quality
 hides nonessential glows when frame rate drops or the task pool becomes dense.
