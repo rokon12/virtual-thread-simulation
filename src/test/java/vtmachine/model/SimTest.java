@@ -100,6 +100,22 @@ class SimTest {
     }
 
     @Test
+    void consequenceMeterAccumulatesPinnedAndParkedThreadSeconds() {
+        Sim sim = runningMachine(21);
+        assertTrue(sim.forcePin());
+        assertTrue(sim.forcePark());
+
+        advance(sim, 0.75);
+
+        Sim.ConsequenceStats stats = sim.consequenceStats();
+        assertEquals(sim.carriers().size(), stats.carrierCount());
+        assertTrue(stats.pinned() > 0);
+        assertTrue(stats.parked() > 0);
+        assertTrue(stats.pinnedThreadSeconds() >= 0.7);
+        assertTrue(stats.parkedThreadSeconds() >= 0.7);
+    }
+
+    @Test
     void jdkComparisonChapterStartsTheSplitScreenRace() {
         Sim sim = runningMachine(23);
         sim.gotoChapter(4);

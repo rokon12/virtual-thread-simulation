@@ -76,6 +76,11 @@ During a guided park, an X-ray overlay names representative Java frames such as
 frames compress into a single heap-backed continuation, follow the VT through
 the heap and run queue, and expand again while it remounts.
 
+A live consequence meter anchors the lower-right presentation view. It reports
+free carriers, run-queue pressure, completed tasks, and cumulative pinned versus
+parked VT-seconds. The latter are aggregate thread-seconds, so ten VTs parked
+for one second contribute ten parked VT-seconds.
+
 The sidebar includes live total, carrier utilization, average I/O, event-log
 highlighting, and a rolling completions/second chart. `AUTO` render quality
 hides nonessential glows when frame rate drops or the task pool becomes dense.

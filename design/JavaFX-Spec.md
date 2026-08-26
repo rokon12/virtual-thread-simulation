@@ -219,6 +219,11 @@ device-specific blocking frame) compress into a compact heap-backed
 continuation during the 0.85-second park tween. The compact continuation follows
 the VT through heap and queue, then expands during the 0.55-second mount tween.
 
+A 620×84 lower-right consequence meter reads from model-owned counters. It
+shows free carriers, runnable queue pressure, completed tasks, and cumulative
+pinned/parked VT-seconds. Each tick adds `pinnedCarriers × dt` and
+`parkedVirtualThreads × dt`, making the cost comparison quantitative and replay-safe.
+
 ## 7 · Project Setup
 
 ```xml

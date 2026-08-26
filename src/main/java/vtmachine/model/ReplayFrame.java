@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 import vtmachine.model.Sim.Flash;
+import vtmachine.model.Sim.ConsequenceStats;
 import vtmachine.model.Sim.IoDevice;
 import vtmachine.model.Sim.JdkComparison;
 import vtmachine.model.Sim.JdkShowdown;
@@ -22,7 +23,7 @@ import vtmachine.model.Sim.VtState;
 public record ReplayFrame(double time, double bootT, int chapter, boolean freeRun,
         boolean liveMode, int maxThreads, Scenario scenario, JdkComparison jdkComparison,
         JdkShowdown jdkShowdown, int scenarioSubmitted,
-        Stats stats, ProfileStats profileStats, double averageIoSeconds,
+        Stats stats, ConsequenceStats consequenceStats, ProfileStats profileStats, double averageIoSeconds,
         double carrierUtilization, ResourcePoolStats resourcePoolStats,
         List<ScopeStats> structuredScopes, List<String> log,
         Map<Flash, Double> flashAges, List<CarrierFrame> carriers,
@@ -78,7 +79,7 @@ public record ReplayFrame(double time, double bootT, int chapter, boolean freeRu
         for (Flash flash : Flash.values()) flashAges.put(flash, sim.flashAge(flash));
         return new ReplayFrame(now, sim.bootT(), sim.chapter(), sim.freeRun(), sim.liveMode(),
                 sim.maxThreads(), sim.scenario(), sim.jdkComparison(), sim.jdkShowdown(),
-                sim.scenarioSubmitted(), sim.stats(),
+                sim.scenarioSubmitted(), sim.stats(), sim.consequenceStats(),
                 sim.profileStats(), sim.averageIoSeconds(), sim.carrierUtilization(),
                 sim.resourcePoolStats(), sim.structuredScopes(), List.copyOf(sim.log()),
                 Map.copyOf(flashAges), carrierFrames, threadFrames);

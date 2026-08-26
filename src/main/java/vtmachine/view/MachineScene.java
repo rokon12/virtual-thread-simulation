@@ -100,6 +100,7 @@ public final class MachineScene extends StackPane {
     private final Canvas jdkShowdownCanvas = new Canvas(760, 250);
     private final Canvas spotlightCanvas = new Canvas();
     private final Canvas continuationCanvas = new Canvas();
+    private final Canvas consequenceCanvas = new Canvas(620, 84);
     private final CameraRig camera = new CameraRig();
     private final Label tooltip = new Label();
     private final HBox cameraButtons;
@@ -221,6 +222,8 @@ public final class MachineScene extends StackPane {
         continuationCanvas.heightProperty().bind(heightProperty());
         continuationCanvas.setAccessibleRole(AccessibleRole.TEXT);
         continuationCanvas.setVisible(false);
+        consequenceCanvas.setMouseTransparent(true);
+        consequenceCanvas.setAccessibleRole(AccessibleRole.TEXT);
         tooltip.getStyleClass().add("vt-tooltip");
         tooltip.setManaged(false);
         tooltip.setVisible(false);
@@ -250,7 +253,7 @@ public final class MachineScene extends StackPane {
 
         getChildren().addAll(subScene, terminationCanvas, labelOverlay, cameraButtons, shortcut,
                 diagnostics, spotlightCanvas, continuationCanvas, comparisonOverlay,
-                lessonCanvas, jdkShowdownCanvas, followOverlay);
+                lessonCanvas, jdkShowdownCanvas, consequenceCanvas, followOverlay);
         StackPane.setAlignment(cameraButtons, Pos.TOP_RIGHT);
         StackPane.setMargin(cameraButtons, new Insets(14, 16, 0, 0));
         StackPane.setAlignment(shortcut, Pos.BOTTOM_RIGHT);
@@ -265,6 +268,9 @@ public final class MachineScene extends StackPane {
         StackPane.setMargin(jdkShowdownCanvas, new Insets(54, 0, 0, 0));
         StackPane.setAlignment(followOverlay, Pos.TOP_LEFT);
         StackPane.setMargin(followOverlay, new Insets(54, 0, 0, 16));
+        StackPane.setAlignment(consequenceCanvas, Pos.BOTTOM_RIGHT);
+        StackPane.setMargin(consequenceCanvas, new Insets(0, 16, 16, 0));
+        StackPane.setMargin(shortcut, new Insets(0, 16, 106, 0));
 
         installPointerControls();
     }
@@ -895,6 +901,7 @@ public final class MachineScene extends StackPane {
         syncTerminationEffects();
         syncCinematicSpotlight(dt);
         syncContinuationXray();
+        drawConsequenceMeter();
         syncFollowOverlay();
         syncComparisonOverlay();
         syncJdkShowdown();
@@ -1489,6 +1496,70 @@ public final class MachineScene extends StackPane {
         return new String[] { "handleRequest()", "loadApplicationData()", blockingFrame };
     }
 
+    private void drawConsequenceMeter() {
+        boolean visible = displayBootT() >= 3 && !displayJdkShowdown().active();
+        consequenceCanvas.setVisible(visible);
+        if (!visible) return;
+        Sim.ConsequenceStats stats = displayConsequenceStats();
+        GraphicsContext graphics = consequenceCanvas.getGraphicsContext2D();
+        double width = consequenceCanvas.getWidth();
+        double height = consequenceCanvas.getHeight();
+        graphics.clearRect(0, 0, width, height);
+        graphics.setFill(Color.web("#08111d", 0.94));
+        graphics.fillRoundRect(0, 0, width, height, 14, 14);
+        graphics.setStroke(Color.web("#26364a", 0.92));
+        graphics.strokeRoundRect(0.5, 0.5, width - 1, height - 1, 14, 14);
+        graphics.setTextAlign(TextAlignment.LEFT);
+        graphics.setFont(Font.font("IBM Plex Mono", 9));
+        graphics.setFill(Color.web("#8ea2b8"));
+        graphics.fillText("LIVE CONSEQUENCE METER", 13, 14);
+
+        double[] values = {
+            stats.carrierCount() == 0 ? 0 : stats.carriersFree() / (double) stats.carrierCount(),
+            clamp(stats.queued() / (Math.max(1, stats.carrierCount()) * 6.0), 0, 1),
+            clamp(stats.completed() / (double) Math.max(1,
+                    stats.completed() + stats.queued() + stats.parked()), 0, 1),
+            clamp((stats.pinned() + stats.parked()) / (double) Math.max(1, stats.carrierCount() * 2), 0, 1)
+        };
+        String[] labels = { "FREE CARRIERS", "RUN QUEUE", "COMPLETED", "BLOCKED VT·s" };
+        String[] primary = {
+            stats.carriersFree() + " / " + stats.carrierCount(),
+            Integer.toString(stats.queued()),
+            Integer.toString(stats.completed()),
+            String.format(Locale.ROOT, "%.1f", stats.pinnedThreadSeconds() + stats.parkedThreadSeconds())
+        };
+        String[] detail = {
+            stats.carriersFree() == 0 ? "SATURATED" : "AVAILABLE",
+            stats.queued() > stats.carrierCount() ? "BACKPRESSURE" : "READY",
+            "TASKS FINISHED",
+            String.format(Locale.ROOT, "PIN %.1f · PARK %.1f",
+                    stats.pinnedThreadSeconds(), stats.parkedThreadSeconds())
+        };
+        Color[] colors = { GREEN, stats.queued() > stats.carrierCount() ? RED : BLUE, WHITE, PURPLE };
+        double columnWidth = 149;
+        for (int i = 0; i < labels.length; i++) {
+            double x = 13 + i * columnWidth;
+            graphics.setFont(Font.font("IBM Plex Mono", 8));
+            graphics.setFill(Color.web("#718399"));
+            graphics.fillText(labels[i], x, 31);
+            graphics.setFont(Font.font("IBM Plex Mono", 16));
+            graphics.setFill(colors[i]);
+            graphics.fillText(primary[i], x, 51);
+            graphics.setFont(Font.font("IBM Plex Mono", 7.5));
+            graphics.setFill(Color.web("#8ea2b8"));
+            graphics.fillText(detail[i], x, 64);
+            graphics.setFill(Color.web("#1a2735"));
+            graphics.fillRoundRect(x, 70, 130, 5, 3, 3);
+            graphics.setFill(colors[i]);
+            graphics.fillRoundRect(x, 70, 130 * values[i], 5, 3, 3);
+        }
+        consequenceCanvas.setAccessibleText("Consequence meter. " + stats.carriersFree() + " of "
+                + stats.carrierCount() + " carriers free, " + stats.queued() + " queued, "
+                + stats.completed() + " completed, "
+                + String.format(Locale.ROOT, "%.1f pinned and %.1f parked virtual-thread seconds",
+                        stats.pinnedThreadSeconds(), stats.parkedThreadSeconds()));
+    }
+
     private void syncJdkShowdown() {
         Sim.JdkShowdown race = displayJdkShowdown();
         jdkShowdownCanvas.setVisible(race.active());
@@ -1909,6 +1980,9 @@ public final class MachineScene extends StackPane {
                 : replayFrame.flashAges().getOrDefault(flash, Double.POSITIVE_INFINITY);
     }
     private Sim.Stats displayStats() { return replayFrame == null ? sim.stats() : replayFrame.stats(); }
+    private Sim.ConsequenceStats displayConsequenceStats() {
+        return replayFrame == null ? sim.consequenceStats() : replayFrame.consequenceStats();
+    }
     private Sim.Scenario displayScenario() {
         return replayFrame == null ? sim.scenario() : replayFrame.scenario();
     }

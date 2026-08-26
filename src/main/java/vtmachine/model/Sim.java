@@ -33,6 +33,9 @@ public final class Sim {
     public record Stats(int runnable, int mounted, int parked, int completed) {}
     public record ProfileStats(int fast, int compute, int ioBound) {}
     public record ResourcePoolStats(int capacity, int inUse, int waiting) {}
+    public record ConsequenceStats(int carriersFree, int carrierCount, int queued,
+            int completed, int pinned, int parked,
+            double pinnedThreadSeconds, double parkedThreadSeconds) {}
     public record ScopeStats(int id, String name, int total, int active,
             int succeeded, int failed, int cancelled, boolean joined) {}
     public record JdkShowdown(boolean active, double elapsed, int totalTasks,
@@ -132,6 +135,8 @@ public final class Sim {
     private int completed;
     private double ioSecondsTotal;
     private int ioSamples;
+    private double pinnedThreadSeconds;
+    private double parkedThreadSeconds;
     private int chapter;
     private volatile boolean running = true;
     private boolean freeRun;
@@ -212,7 +217,19 @@ public final class Sim {
         carrierPhase(dt);
         runPhase(dt);
         parkedPhase(dt);
+        accumulateConsequenceTime(dt);
         reapPhase();
+    }
+
+    private void accumulateConsequenceTime(double dt) {
+        int pinned = 0;
+        for (Carrier carrier : carriers) if (carrier.pinned()) pinned++;
+        int parked = 0;
+        for (Vt vt : vts) {
+            if (vt.state == VtState.PARKING || vt.state == VtState.PARKED) parked++;
+        }
+        pinnedThreadSeconds += pinned * dt;
+        parkedThreadSeconds += parked * dt;
     }
 
     private void spawnPhase(double dt) {
@@ -950,6 +967,8 @@ public final class Sim {
         completed = 0;
         ioSecondsTotal = 0;
         ioSamples = 0;
+        pinnedThreadSeconds = 0;
+        parkedThreadSeconds = 0;
         chapter = 0;
         running = true;
         freeRun = false;
@@ -989,6 +1008,8 @@ public final class Sim {
         completed = 0;
         ioSecondsTotal = 0;
         ioSamples = 0;
+        pinnedThreadSeconds = 0;
+        parkedThreadSeconds = 0;
         hero = null;
         pendingJdkComparison = JdkComparison.NONE;
         jdkComparison = JdkComparison.NONE;
@@ -1076,6 +1097,15 @@ public final class Sim {
         int parked = 0;
         for (Vt vt : vts) if (vt.state == VtState.PARKED || vt.state == VtState.PARKING) parked++;
         return new Stats(queue.size(), mounted, parked, completed);
+    }
+
+    public ConsequenceStats consequenceStats() {
+        Stats stats = stats();
+        int pinned = 0;
+        for (Carrier carrier : carriers) if (carrier.pinned()) pinned++;
+        return new ConsequenceStats(Math.max(0, carriers.size() - stats.mounted()), carriers.size(),
+                stats.runnable(), stats.completed(), pinned, stats.parked(),
+                pinnedThreadSeconds, parkedThreadSeconds);
     }
 
     public ProfileStats profileStats() {
