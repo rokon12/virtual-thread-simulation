@@ -39,6 +39,33 @@ class SimTest {
     }
 
     @Test
+    void jdk21SynchronizedBlockingPinsTheCarrier() {
+        Sim sim = runningMachine(11);
+
+        assertTrue(sim.demonstrateJdk21SynchronizedBlock());
+
+        assertEquals(Sim.JdkComparison.JDK_21_PINNED, sim.jdkComparison());
+        assertTrue(sim.carriers().stream().anyMatch(Carrier::pinned));
+        assertTrue(sim.log().peekFirst().contains("JDK 21 synchronized wait · PINNED"));
+    }
+
+    @Test
+    void jdk25SynchronizedBlockingUnmountsAndReleasesTheCarrier() {
+        Sim sim = runningMachine(13);
+        assertTrue(sim.demonstrateJdk21SynchronizedBlock());
+        int mountedBefore = sim.stats().mounted();
+
+        assertTrue(sim.demonstrateJdk25SynchronizedBlock());
+
+        assertEquals(Sim.JdkComparison.JDK_25_UNMOUNTED, sim.jdkComparison());
+        assertFalse(sim.carriers().stream().anyMatch(Carrier::pinned));
+        assertEquals(mountedBefore - 1, sim.stats().mounted());
+        assertTrue(sim.stats().parked() > 0);
+        assertTrue(sim.log().peekFirst().contains(
+                "JDK 25 synchronized wait · unmounted · carrier released"));
+    }
+
+    @Test
     void pinFreezesWorkUntilItExpires() {
         Sim sim = runningMachine(19);
         Vt running = sim.vts().stream().filter(v -> v.state() == Sim.VtState.RUNNING).findFirst().orElseThrow();

@@ -40,6 +40,10 @@ public final class Sim {
         NONE, PLATFORM_COMPARISON, RESOURCE_POOL, CPU_BOUND, STRUCTURED
     }
 
+    public enum JdkComparison {
+        NONE, JDK_21_PINNED, JDK_25_UNMOUNTED
+    }
+
     public enum Outcome {
         ACTIVE, COMPLETED, FAILED, CANCELLED
     }
@@ -126,10 +130,11 @@ public final class Sim {
     private boolean freeRun;
     private boolean chaos;
     private boolean pendingPark;
-    private boolean pendingPin;
+    private JdkComparison pendingJdkComparison = JdkComparison.NONE;
     private boolean bootAutoAdvanced;
     private boolean liveMode;
     private Scenario scenario = Scenario.NONE;
+    private JdkComparison jdkComparison = JdkComparison.NONE;
     private int scenarioSubmitted;
     private int scenarioSpawned;
     private int permitsInUse;
@@ -296,9 +301,17 @@ public final class Sim {
                 park(vt);
                 continue;
             }
-            if (pendingPin) {
-                pendingPin = false;
-                pin(vt);
+            if (pendingJdkComparison != JdkComparison.NONE) {
+                JdkComparison comparison = pendingJdkComparison;
+                pendingJdkComparison = JdkComparison.NONE;
+                jdkComparison = comparison;
+                if (comparison == JdkComparison.JDK_21_PINNED) {
+                    pin(vt, "JDK 21 synchronized wait · PINNED");
+                } else {
+                    clearPinnedCarriers();
+                    park(vt, "JDK 25 synchronized wait · unmounted · carrier released");
+                    continue;
+                }
             }
             if (carrier.pinned()) continue;
             if (vt.live) continue;
@@ -547,6 +560,10 @@ public final class Sim {
     }
 
     private void park(Vt vt) {
+        park(vt, null);
+    }
+
+    private void park(Vt vt, String message) {
         Carrier carrier = vt.carrier;
         if (carrier != null) carrier.mounted = null;
         vt.carrier = null;
@@ -578,8 +595,9 @@ public final class Sim {
         }
         tween(vt, heapSlot(parkedCount), 0.85, Arrival.PARKED);
         flash(Flash.PARK);
-        addLog("VT-" + vt.id + (vt.waitingForPermit
-                ? " parked · waiting for DB permit" : " I/O wait · carrier released"));
+        addLog(message == null ? "VT-" + vt.id + (vt.waitingForPermit
+                ? " parked · waiting for DB permit" : " I/O wait · carrier released")
+                : "VT-" + vt.id + " " + message);
     }
 
     private void resume(Vt vt) {
@@ -629,11 +647,17 @@ public final class Sim {
     }
 
     private void pin(Vt vt) {
+        pin(vt, null);
+    }
+
+    private void pin(Vt vt, String message) {
         if (vt.carrier == null) return;
         vt.carrier.pinT = 2.6 + random.nextDouble() * 1.2;
         flash(Flash.PIN);
-        addLog("VT-" + vt.id + (vt.live ? " demo native/foreign PIN on C" : " PINNED on C")
-                + (vt.carrier.index() + 1));
+        addLog(message == null
+                ? "VT-" + vt.id + (vt.live ? " demo native/foreign PIN on C" : " PINNED on C")
+                        + (vt.carrier.index() + 1)
+                : "VT-" + vt.id + " " + message + " on C" + (vt.carrier.index() + 1));
     }
 
     private void complete(Vt vt, Carrier carrier) {
@@ -726,6 +750,46 @@ public final class Sim {
         return false;
     }
 
+    public boolean demonstrateJdk21SynchronizedBlock() {
+        if (liveMode) {
+            addLog("JDK version comparison is available in synthetic mode");
+            return false;
+        }
+        jdkComparison = JdkComparison.JDK_21_PINNED;
+        clearPinnedCarriers();
+        for (Vt vt : vts) {
+            if (vt.state == VtState.RUNNING && vt.carrier != null && !vt.carrier.pinned()) {
+                pin(vt, "JDK 21 synchronized wait · PINNED");
+                return true;
+            }
+        }
+        pendingJdkComparison = JdkComparison.JDK_21_PINNED;
+        addLog("JDK 21 synchronized demo armed · waiting for VT");
+        return false;
+    }
+
+    public boolean demonstrateJdk25SynchronizedBlock() {
+        if (liveMode) {
+            addLog("JDK version comparison is available in synthetic mode");
+            return false;
+        }
+        jdkComparison = JdkComparison.JDK_25_UNMOUNTED;
+        clearPinnedCarriers();
+        for (Vt vt : vts) {
+            if (vt.state == VtState.RUNNING && vt.carrier != null) {
+                park(vt, "JDK 25 synchronized wait · unmounted · carrier released");
+                return true;
+            }
+        }
+        pendingJdkComparison = JdkComparison.JDK_25_UNMOUNTED;
+        addLog("JDK 25 synchronized demo armed · waiting for VT");
+        return false;
+    }
+
+    private void clearPinnedCarriers() {
+        for (Carrier carrier : carriers) carrier.pinT = 0;
+    }
+
     public void burst(int count) {
         if (count <= 0) return;
         if (scenario == Scenario.STRUCTURED) {
@@ -745,8 +809,9 @@ public final class Sim {
         chaos = false;
         spawnRate = 0;
         pendingPark = false;
-        pendingPin = false;
+        pendingJdkComparison = JdkComparison.NONE;
         scenario = Scenario.NONE;
+        jdkComparison = JdkComparison.NONE;
         scenarioSubmitted = 0;
         scenarioSpawned = 0;
 
@@ -776,9 +841,10 @@ public final class Sim {
                 if (!liveMode) {
                     if (vts.stream().noneMatch(v -> v.state == VtState.RUNNING)) burst += 4;
                     burst += carriers.size() * 3;
+                    pendingJdkComparison = JdkComparison.JDK_21_PINNED;
+                    jdkComparison = JdkComparison.JDK_21_PINNED;
                 }
-                pendingPin = true;
-                addLog("chapter: pinned");
+                addLog("chapter: JDK 21 vs 25 synchronized blocking");
             }
             case 5 -> {
                 if (!liveMode) burst += Math.max(0, maxThreads - vts.size());
@@ -853,9 +919,10 @@ public final class Sim {
         freeRun = false;
         chaos = false;
         pendingPark = false;
-        pendingPin = false;
+        pendingJdkComparison = JdkComparison.NONE;
         bootAutoAdvanced = false;
         scenario = Scenario.NONE;
+        jdkComparison = JdkComparison.NONE;
         scenarioSubmitted = 0;
         scenarioSpawned = 0;
         hero = null;
@@ -886,6 +953,8 @@ public final class Sim {
         ioSecondsTotal = 0;
         ioSamples = 0;
         hero = null;
+        pendingJdkComparison = JdkComparison.NONE;
+        jdkComparison = JdkComparison.NONE;
         for (Carrier carrier : carriers) {
             carrier.mounted = null;
             carrier.pinT = 0;
@@ -955,6 +1024,7 @@ public final class Sim {
     public boolean freeRun() { return freeRun; }
     public boolean liveMode() { return liveMode; }
     public Scenario scenario() { return scenario; }
+    public JdkComparison jdkComparison() { return jdkComparison; }
     public int scenarioSubmitted() { return scenarioSubmitted; }
     public int maxThreads() { return maxThreads; }
     public long seed() { return seed; }

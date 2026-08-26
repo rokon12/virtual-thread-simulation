@@ -268,10 +268,16 @@
     -fx-text-fill: #c4b5fd;
 }
 
-.pin-button {
+.jdk21-button {
     -fx-background-color: #2b0f0f;
     -fx-border-color: #5c2a2a;
     -fx-text-fill: #fca5a5;
+}
+
+.jdk25-button {
+    -fx-background-color: #0f2b21;
+    -fx-border-color: #2a5c48;
+    -fx-text-fill: #6ee7b7;
 }
 
 .settings-button, .about-button {

@@ -35,7 +35,7 @@ import vtmachine.model.ReplayTimeline;
 public final class Hud {
     private static final Pattern VT_ID = Pattern.compile("VT-(\\d+)");
     private static final String[] CHAPTER_TITLES = {
-        "BOOT", "MOUNT", "PARK", "RESUME", "PINNED", "SCALE",
+        "BOOT", "MOUNT", "PARK", "RESUME", "JDK 21 vs 25", "SCALE",
         "PLATFORM vs VT", "POOL LIMIT", "CPU BOUND", "STRUCTURED"
     };
     private static final String[] CHAPTER_COLORS = {
@@ -47,7 +47,7 @@ public final class Hud {
         "Application tasks arrive with varied runtimes: some finish quickly, some compute longer, and dotted-satellite tasks will perform I/O. The scheduler mounts each runnable VT onto a free carrier; only while mounted does a VT consume an OS thread.",
         "An I/O-bound VT reaches its randomized wait. Its stack-chunk marker lifts from the carrier into the heap while a pulse travels to the external network, disk, timer, or database endpoint. The carrier is instantly free for another VT.",
         "The external I/O completes. The stored continuation moves back through the run queue and remounts on ANY free carrier — not necessarily the one it left. Watch the stack marker merge into a different slot.",
-        "Compare the two paths above the machine: parking moves stack chunks to the heap and releases the carrier; native or foreign-function pinning locks the carrier red and makes runnable work wait. Ordinary synchronized code no longer pins on Java 25.",
+        "Run the same blocking operation inside synchronized. On JDK 21 it pins the VT to its carrier. Since JDK 24 (JEP 491), JDK 25 can unmount it and release the carrier. Native or foreign-function frames may still pin.",
         "The payoff. 500 mixed-duration tasks flood in while the green run-queue pressure bar expands. A fixed set of illustrative carriers drains the queue; I/O parking releases lanes, pinning blocks them, and completed VTs dissolve in place after releasing their carrier.",
         "Run the same blocking I/O workload two ways. A platform-thread-per-task design ties up one costly OS thread per wait; virtual threads park cheaply while a small, fixed carrier pool keeps executing other work.",
         "Virtual threads remove the thread bottleneck, not downstream limits. Only three tasks may hold a database connection; every other VT parks in the heap without occupying a carrier until a permit becomes available.",
@@ -56,7 +56,8 @@ public final class Hud {
     };
 
     public record Actions(Runnable playPause, IntConsumer chapter, Consumer<Boolean> freeRun,
-            Consumer<Boolean> liveMode, Runnable burst, Runnable park, Runnable pin,
+            Consumer<Boolean> liveMode, Runnable burst, Runnable park,
+            Runnable jdk21Block, Runnable jdk25Block,
             Runnable settings, Runnable about, LongConsumer highlight, IntConsumer replayFrame,
             Runnable returnLive, Runnable refocus) {}
 
@@ -72,6 +73,8 @@ public final class Hud {
     private final Label subtitle = new Label("Mount · Park · Resume · Pin — virtual threads on a tiny carrier pool, live in 3D");
     private final Label feedNotice = new Label();
     private final Button playButton = new Button("Pause");
+    private Button jdk21Button;
+    private Button jdk25Button;
     private final ToggleButton guided = new ToggleButton("GUIDED");
     private final ToggleButton freeRun = new ToggleButton("FREE RUN");
     private final ToggleButton synthetic = new ToggleButton("SYNTHETIC");
@@ -199,7 +202,8 @@ public final class Hud {
                 behaviorCard(Sim.Flash.MOUNT, "① Mount", "Runnable VT occupies one lane.", "blue"),
                 behaviorCard(Sim.Flash.PARK, "② I/O wait", "Stack chunks move to heap; external I/O pulse continues.", "purple"),
                 behaviorCard(Sim.Flash.RESUME, "③ Resume", "Continuation returns through queue to any free lane.", "green"),
-                behaviorCard(Sim.Flash.PIN, "④ Pinned", "Carrier stays red while queued work waits.", "red"));
+                behaviorCard(Sim.Flash.PIN, "④ JDK 21 vs 25",
+                        "synchronized wait: pin on 21, unmount on 25.", "red"));
 
         Label throughputHeader = new Label("THROUGHPUT · COMPLETIONS/S");
         throughputHeader.getStyleClass().add("section-header");
@@ -270,8 +274,10 @@ public final class Hud {
                 "Submit 25 tasks to the selected workload");
         Button park = controlButton("Force park", "park-button", actions.park,
                 "Park one running virtual thread");
-        Button pin = controlButton("Force pin", "pin-button", actions.pin,
-                "Demonstrate one native or foreign-function pin");
+        jdk21Button = controlButton("JDK 21", "jdk21-button", actions.jdk21Block,
+                "JDK 21: blocking inside synchronized pins the virtual thread to its carrier");
+        jdk25Button = controlButton("JDK 25", "jdk25-button", actions.jdk25Block,
+                "JDK 25: the same synchronized blocking operation unmounts and releases the carrier");
         Button settings = controlButton("Settings", "settings-button", actions.settings,
                 "Change carrier count, task limit, task rate, and random seed");
         Button about = controlButton("About", "about-button", actions.about,
@@ -294,7 +300,8 @@ public final class Hud {
         });
         speedReadout.getStyleClass().add("speed-readout");
         speedReadout.setMinWidth(44);
-        bar.getChildren().addAll(playButton, burst, park, pin, settings, about, timelineControl,
+        bar.getChildren().addAll(playButton, burst, park, jdk21Button, jdk25Button,
+                settings, about, timelineControl,
                 performance, speedLabel, speedSlider, speedReadout);
         return bar;
     }
@@ -469,6 +476,8 @@ public final class Hud {
         freeRun.setSelected(displayedFreeRun);
         synthetic.setSelected(!displayedLive);
         live.setSelected(displayedLive);
+        jdk21Button.setDisable(displayedLive);
+        jdk25Button.setDisable(displayedLive);
         Sim.ProfileStats mix = replayFrame == null ? sim.profileStats() : replayFrame.profileStats();
         double averageIo = replayFrame == null ? sim.averageIoSeconds() : replayFrame.averageIoSeconds();
         feedNotice.setText((displayedLive

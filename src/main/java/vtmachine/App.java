@@ -127,7 +127,8 @@ public final class App extends Application {
         replayTimeline.capture(sim, true);
         machine = new MachineScene(sim);
         Hud.Actions actions = new Hud.Actions(this::togglePlayPause, this::gotoChapter, this::setFreeRun,
-                this::switchLiveMode, () -> submitTasks(25), this::forcePark, this::forcePin,
+                this::switchLiveMode, () -> submitTasks(25), this::forcePark,
+                this::demonstrateJdk21SynchronizedBlock, this::demonstrateJdk25SynchronizedBlock,
                 this::showSettings, this::showAbout, machine::highlightVt, this::showReplayFrame,
                 this::returnLive, machine::requestFocus);
         hud = new Hud(sim, replayTimeline, actions);
@@ -359,9 +360,21 @@ public final class App extends Application {
         captureReplayNow();
     }
 
-    private void forcePin() {
+    private void demonstrateJdk21SynchronizedBlock() {
         if (replaying) returnLive();
-        sim.forcePin();
+        if (sim.liveMode()) return;
+        if (!sim.demonstrateJdk21SynchronizedBlock()) {
+            sim.burst(Math.max(4, sim.carriers().size()));
+        }
+        captureReplayNow();
+    }
+
+    private void demonstrateJdk25SynchronizedBlock() {
+        if (replaying) returnLive();
+        if (sim.liveMode()) return;
+        if (!sim.demonstrateJdk25SynchronizedBlock()) {
+            sim.burst(Math.max(4, sim.carriers().size()));
+        }
         captureReplayNow();
     }
 

@@ -87,7 +87,7 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 | 2 | MOUNT | burst +6, chaos off | carriers (0.35, 1.25, 150, 30) |
 | 3 | PARK | pendingPark=true (next running VT parks) | heap (−0.55, 1.15, 170, 45) |
 | 4 | RESUME | clamp a parked VT's io ≤ 0.8 s | carriers |
-| 5 | PINNED | pendingPin=true | carriers |
+| 5 | JDK 21 vs 25 | arm JDK 21 synchronized-block comparison | carriers |
 | 6 | SCALE | burst to 500, chaos on | overview · TOP preset = (0.65, 0.35, 300, 40) |
 | 7 | PLATFORM vs VT | clear workload; submit the same I/O-bound task count to the virtual-thread model; show the platform-thread baseline | overview |
 | 8 | POOL LIMIT | clear workload; submit database I/O tasks behind three connection permits | heap |
@@ -101,7 +101,7 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 | Header | Pulsing green LED (1.6 s), title, GUIDED/FREE RUN toggle (ToggleGroup), status text BOOTING/RUNNING/PAUSED |
 | Right sidebar 290px | Counters include RUNNABLE, MOUNTED, PARKED, COMPLETED, live total, and utilization · task-profile mix · throughput graph · 4 behavior cards · event log, 7 clickable mono lines |
 | Narration card | Bottom-left 400px overlay: CHAPTER n/10, colored title, body text, ←/Next buttons. Chapter copy: §10 verbatim |
-| Bottom bar | Pause/Run · +25 tasks · Force park · Force pin · replay scrubber with marker rail and LIVE return · speed Slider + readout "0.75×" |
+| Bottom bar | Pause/Run · +25 tasks · Force park · JDK 21 · JDK 25 · replay scrubber with marker rail and LIVE return · speed Slider + readout "0.75×" |
 | Keyboard | SPACE live/replay play-pause · J/K history step · L return live · ←/→ chapters (or slider step while focused) · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480) |
 | Hover / follow | PickResult on the VT pool → tooltip; click a VT or log line to pin a lifecycle card showing RUNNABLE / MOUNTED / PARKED / TERMINATED durations |
 
@@ -196,10 +196,10 @@ try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
 }
 // sim.post() enqueues onto a ConcurrentLinkedQueue drained by tick();
 // carrier lanes then show REAL mounts: read carrier id via
-// jdk.internal tracking or JFR jdk.VirtualThreadPinned events for §PINNED
+// jdk.internal tracking or JFR jdk.VirtualThreadPinned events for live pin observations
 ```
 
-Virtual threads are final since Java 21 — no preview flags on 25. For the PINNED chapter with real threads, trigger it honestly: `synchronized (lock) { Thread.sleep(...); }` pins only on Java ≤23. Since Java 24 (JEP 491), `synchronized`, monitor entry, and `Object.wait()` can all unmount normally. A Java 25 pin requires a native or foreign-function frame on the stack (for example, native code calling back into blocking Java code). The synthetic PINNED chapter represents that remaining case and must say so explicitly.
+Virtual threads are final since Java 21 — no preview flags on 25. The two synthetic comparison buttons run the same modeled `synchronized (lock) { Thread.sleep(...); }` operation: JDK 21 pins the VT, while JDK 25 unmounts it and releases the carrier. Since Java 24 (JEP 491), `synchronized`, monitor entry, and `Object.wait()` can all unmount normally. A Java 25 pin can still occur with a native or foreign-function frame on the stack (for example, native code calling back into blocking Java code). The version buttons are disabled in `LIVE JDK`, which always reflects the host JDK rather than emulating JDK 21.
 
 ## 7 · Project Setup
 
@@ -230,10 +230,13 @@ public final class Sim {
     public record Stats(int runnable, int mounted, int parked, int completed) {}
     public enum VtState { TO_QUEUE, QUEUED, MOUNTING, RUNNING, PARKING, PARKED, DONE, DEAD }
     public enum Flash   { MOUNT, PARK, RESUME, PIN }
+    public enum JdkComparison { NONE, JDK_21_PINNED, JDK_25_UNMOUNTED }
 
     // -- control surface (called from FX thread only) --
     void tick(double dt);            void setRunning(boolean b);   void setSpeed(double s);
     void burst(int n);               boolean forcePark();          boolean forcePin();
+    boolean demonstrateJdk21SynchronizedBlock();
+    boolean demonstrateJdk25SynchronizedBlock();
     void gotoChapter(int i);         void setFreeRun(boolean b);   void reset(int carriers);
 
     // -- read surface (view + hud) --
@@ -262,7 +265,8 @@ public final class Sim {
                        → RUNNING on arrive; flash(MOUNT); log(mounted|resumed on Cn)
 6  RUN       for each RUNNING vt: carrier.heat = min(1, heat+2dt)
              pendingPark? → park(vt) and clear flag        // guided chapter 3
-             pendingPin?  → pin(vt) and clear flag          // guided chapter 5
+             pending JDK 21? → pin(vt) and clear flag       // guided chapter 5
+             pending JDK 25? → park(vt) and clear flag      // comparison control
              carrier pinned? → skip (work frozen)
              work −= dt
              IO_BOUND && !resumed && work≤ioTrigger → park(vt)
@@ -275,6 +279,8 @@ public final class Sim {
 park(vt): free carrier; PARKING; io=planned 1–8 s (or a random demo wait); tween to heapSlot 0.85s
           → PARKED; flash(PARK); log("VT-n I/O wait · carrier released")
 pin(vt):  carrier.pinT = 2.6+rnd*1.2; flash(PIN); log("VT-n PINNED on Cn")
+JDK 21 button: pin(vt), label the synchronized wait, and retain the carrier
+JDK 25 button: clear the modeled JDK 21 pin, park(vt), and release the carrier
 ```
 
 Determinism: give Sim an injectable `RandomGenerator` seed so a rehearsed run can be replayed exactly on stage. All randomness above flows through it.
@@ -316,7 +322,7 @@ Threading rule: everything above runs on the FX Application Thread. The only cro
 | 2 MOUNT | Application tasks arrive with varied runtimes: some finish quickly, some compute longer, and dotted-satellite tasks will perform I/O. The scheduler mounts each runnable VT onto a free carrier; only while mounted does a VT consume an OS thread. |
 | 3 PARK | An I/O-bound VT reaches its randomized wait. It turns purple and flies to the heap area while its stack chunks remain with the virtual thread. Its carrier is instantly free to run another VT. |
 | 4 RESUME | The I/O completes. The stored continuation makes the VT runnable again and it remounts on ANY free carrier — not necessarily the one it left. Watch it land on a different slot. |
-| 5 PINNED | A remaining failure mode on Java 25: blocking while a native or foreign-function frame prevents unmounting pins the VT to its carrier. The slot locks red until the pin ends. Ordinary synchronized code no longer pins. |
+| 5 JDK 21 vs 25 | Run the same blocking operation inside synchronized. On JDK 21 it pins the VT to its carrier. Since JDK 24 (JEP 491), JDK 25 can unmount it and release the carrier. Native or foreign-function frames may still pin. |
 | 6 SCALE | The payoff. 500 mixed-duration tasks flood in and the machine does not grow: a fixed set of illustrative carrier lanes multiplexes fast, compute-heavy, and I/O-bound virtual threads, while parked waits retain lightweight heap-backed state. |
 | 7 PLATFORM vs VT | Run the same blocking I/O workload two ways. A platform-thread-per-task design ties up one costly OS thread per wait; virtual threads park cheaply while a small, fixed carrier pool keeps executing other work. |
 | 8 POOL LIMIT | Virtual threads remove the thread bottleneck, not downstream limits. Only three tasks may hold a database connection; every other VT parks in the heap without occupying a carrier until a permit becomes available. |
@@ -328,7 +334,7 @@ Threading rule: everything above runs on the FX Application Thread. The only cro
 | 1 · Mount | Runnable VT mounts on a free carrier thread. |
 | 2 · Park | Blocking I/O unmounts the VT; continuation stored on the heap, carrier released. |
 | 3 · Resume | I/O done; VT remounts on any free carrier. |
-| 4 · Pinned | Blocking with a native/foreign frame can pin the carrier; synchronized alone does not on Java 25. |
+| 4 · JDK 21 vs 25 | A synchronized wait pins and retains the carrier on JDK 21, but unmounts and releases it on JDK 25. |
 
 ## 11 · Performance Budget + Acceptance Checklist
 
@@ -344,7 +350,8 @@ Acceptance — matches the HTML reference sim when:
 - [ ] Boot: 5 layers rise bottom-up over 3 s, then MOUNT chapter auto-enters and 6 tasks spawn
 - [ ] Park: VT arcs to heap tower, carrier ring dims to idle within the same second, PARK card flashes purple
 - [ ] Resume: parked VT re-enters queue HEAD and mounts on a different lane than it left (verify with forced park on C1 while C2 free)
-- [ ] Pinned: slot + core turn red, PINNED label shows, work % frozen for 2.6–3.8 s, other carriers keep flowing
+- [ ] JDK 21 comparison: slot + core turn red, PINNED label shows, work % freezes for 2.6–3.8 s, and queued work waits behind the retained carrier
+- [ ] JDK 25 comparison: the same synchronized wait parks in the heap, the carrier is released immediately, and no lane remains pinned
 - [ ] Scale: counter reaches 500 spawned; RUNNABLE+MOUNTED+PARKED+in-flight ≈ live total; fps holds
 - [ ] Platform comparison: identical I/O task counts show N platform OS threads versus the configured fixed carrier count
 - [ ] Pool limit: at most three DB permits are active; extra VTs remain parked and carriers continue draining work
@@ -431,6 +438,8 @@ Log line format: `%03ds %s` where the integer is floor(sim.t). Every message the
 | park | `VT-{id} I/O wait · carrier released` |
 | I/O completes | `VT-{id} I/O done · runnable` |
 | pin | `VT-{id} PINNED on C{n}` |
+| JDK 21 comparison | `VT-{id} JDK 21 synchronized wait · PINNED on C{n}` |
+| JDK 25 comparison | `VT-{id} JDK 25 synchronized wait · unmounted · carrier released` |
 | pin expires | `VT-{id} unpinned · resumes` |
 | complete | `VT-{id} completed · C{n} free · terminated` |
 | burst button | `burst: 25 tasks submitted` |
@@ -449,7 +458,7 @@ Tooltip text: `VT-{id} · {state}` + (if carrier ≥0) ` on C{n}` + (if RUNNING)
 ```
 i = ((i mod 10) + 10) mod 10               // ← and → wrap around
 mode = GUIDED; chaos = false; spawnRate = 0
-pendingPark = pendingPin = false           // stale flags never leak across chapters
+pendingPark = false; pendingJdkComparison = NONE // stale flags never leak across chapters
 switch i:
   0 BOOT:   reset(carriers); bootT = 0; camera OVERVIEW
             // reset keeps: speed. resets: t, vts, queue, carriers, hero, log, counters
@@ -459,8 +468,9 @@ switch i:
   3 RESUME: p = first PARKED vt; if p: p.io = min(p.io, 0.8)
             else: burst += 2; pendingPark = true    // will park then quickly resume
             camera CARRIERS; log "chapter: resume"
-  4 PINNED: if no RUNNING vt: burst += 4; burst += carriers*3
-            pendingPin = true; camera CARRIERS; log "chapter: pinned" // keeps work queued behind the pin
+  4 JDK:    if no RUNNING vt: burst += 4; burst += carriers*3
+            pendingJdkComparison = JDK_21_PINNED; camera CARRIERS
+            log "chapter: JDK 21 vs 25 synchronized blocking"
   5 SCALE:  burst += maxThreads − vts.size; chaos = true; camera OVERVIEW
             log "chapter: scale — flooding tasks"
   6 COMPARE: clear workload; burst += max(24, carriers*8) I/O tasks; camera OVERVIEW
@@ -473,9 +483,9 @@ switch i:
 Edge cases an agent must honor:
 - During boot (bootT<3) only bootT advances; spawn/mount/etc are skipped, but chapter buttons still work (chapter 0 restarts boot; others take effect once boot ends).
 - Boot end auto-calls `gotoChapter(1)` exactly once.
-- `pendingPark`/`pendingPin` fire on the FIRST vt encountered in RUNNING iteration order, then clear.
+- `pendingPark`/`pendingJdkComparison` fire on the FIRST VT encountered in RUNNING iteration order, then clear.
 - Free-run toggle: chaos=true, spawnRate=taskRate (default 1.4/s), chapter card stays on last chapter. Guided toggle: chaos=false, spawnRate=0; in-flight VTs finish naturally.
-- Force park picks the first RUNNING vt whose carrier is not pinned; force pin likewise. Both log the failure message if none.
+- Force park picks the first RUNNING VT whose carrier is not pinned. Each JDK comparison control picks the first running VT; if none exists, it arms the comparison and submits enough work to make the result visible.
 - Mount selection: first QUEUED vt with no active tween (skips ones still flying in). Resume re-entry: addFirst (queue head) so resumed VTs mount before waiting fresh ones.
 - A resumed vt never parks again (`resumed` flag) — deliberate, keeps the story legible.
 - Hero: assigned at spawn when hero==null; survives park/resume; cleared when DEAD; the next spawn inherits the role.

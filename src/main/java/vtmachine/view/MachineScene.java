@@ -91,8 +91,8 @@ public final class MachineScene extends StackPane {
     private final VBox followOverlay = buildFollowOverlay();
     private final Label comparisonParkValue = new Label();
     private final Label comparisonPinValue = new Label();
-    private final VBox comparisonParkCard = comparisonCard("PARK", "VT → HEAP", comparisonParkValue, "purple");
-    private final VBox comparisonPinCard = comparisonCard("PIN", "VT ⊗ CARRIER", comparisonPinValue, "red");
+    private final VBox comparisonParkCard = comparisonCard("JDK 25", "SYNC → PARK", comparisonParkValue, "purple");
+    private final VBox comparisonPinCard = comparisonCard("JDK 21", "SYNC ⊗ CARRIER", comparisonPinValue, "red");
     private final HBox comparisonOverlay = buildComparisonOverlay();
 
     private final List<BootLayer> bootLayers = new ArrayList<>();
@@ -284,7 +284,8 @@ public final class MachineScene extends StackPane {
         box.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
         box.setMouseTransparent(true);
         box.setVisible(false);
-        box.setAccessibleText("Parking releases a carrier; pinning retains a carrier and increases queue pressure.");
+        box.setAccessibleText("Blocking inside synchronized pins a virtual thread on JDK 21. "
+                + "On JDK 25 it unmounts and releases the carrier. Native or foreign-function frames may still pin.");
         return box;
     }
 
@@ -1224,9 +1225,12 @@ public final class MachineScene extends StackPane {
     }
 
     private void syncComparisonOverlay() {
-        boolean parkMoment = displayChapter() == 2;
-        boolean pinMoment = displayChapter() == 4;
-        comparisonOverlay.setVisible(parkMoment || pinMoment);
+        Sim.JdkComparison comparison = displayJdkComparison();
+        boolean parkMoment = comparison == Sim.JdkComparison.JDK_25_UNMOUNTED
+                || comparison == Sim.JdkComparison.NONE && displayChapter() == 2;
+        boolean pinMoment = comparison == Sim.JdkComparison.JDK_21_PINNED
+                || comparison == Sim.JdkComparison.NONE && displayChapter() == 4 && !displayLiveMode();
+        comparisonOverlay.setVisible(parkMoment || pinMoment || displayChapter() == 4);
         comparisonParkCard.getStyleClass().remove("comparison-active");
         comparisonPinCard.getStyleClass().remove("comparison-active");
         if (parkMoment) comparisonParkCard.getStyleClass().add("comparison-active");
@@ -1235,9 +1239,9 @@ public final class MachineScene extends StackPane {
         for (int i = 0; i < displayCarrierCount(); i++) if (displayCarrierPinned(i)) pinned++;
         int waiting = displayStats().runnable();
         comparisonParkValue.setText("carrier released\n" + displayStats().parked()
-                + " stack" + (displayStats().parked() == 1 ? "" : "s") + " in heap · " + waiting + " queued");
+                + " parked · " + waiting + " queued");
         comparisonPinValue.setText("carrier retained\n" + pinned
-                + " lane" + (pinned == 1 ? "" : "s") + " blocked · " + waiting + " queued");
+                + " pinned · " + waiting + " queued");
     }
 
     private void syncResourcePool() {
@@ -1544,6 +1548,10 @@ public final class MachineScene extends StackPane {
     private double displayBootT() { return replayFrame == null ? sim.bootT() : replayFrame.bootT(); }
     private int displayChapter() { return replayFrame == null ? sim.chapter() : replayFrame.chapter(); }
     private boolean displayFreeRun() { return replayFrame == null ? sim.freeRun() : replayFrame.freeRun(); }
+    private boolean displayLiveMode() { return replayFrame == null ? sim.liveMode() : replayFrame.liveMode(); }
+    private Sim.JdkComparison displayJdkComparison() {
+        return replayFrame == null ? sim.jdkComparison() : replayFrame.jdkComparison();
+    }
     private Sim.Stats displayStats() { return replayFrame == null ? sim.stats() : replayFrame.stats(); }
     private Sim.Scenario displayScenario() {
         return replayFrame == null ? sim.scenario() : replayFrame.scenario();

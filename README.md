@@ -56,9 +56,9 @@ expose ordinary virtual-thread carrier identity.
 - Click a VT or one of its event-log entries: follow its lifecycle and time in
   each state
 - `Esc` or the lifecycle card's × button: stop following a VT
-- HUD controls: switch synthetic/live feeds, add 25 tasks, force a park or
-  demonstration pin, change speed, restart with new demo settings, or open the
-  About dialog
+- HUD controls: switch synthetic/live feeds, add 25 tasks, force a park, compare
+  the same `synchronized` blocking operation on JDK 21 and JDK 25, change speed,
+  restart with new demo settings, or open the About dialog
 
 The sidebar includes live total, carrier utilization, average I/O, event-log
 highlighting, and a rolling completions/second chart. `AUTO` render quality
@@ -89,10 +89,11 @@ The continuation returns through the run queue before mounting on any available
 carrier.
 
 Clicking a VT opens a live lifecycle strip for `RUNNABLE`, `MOUNTED`, `PARKED`,
-and `TERMINATED` durations. The PARK and PINNED chapters compare carrier release
-with carrier retention directly, while a pressure bar expands and contracts
-with the scheduler run queue. Completed VTs release their carrier, turn white,
-and dissolve in place.
+and `TERMINATED` durations. The `JDK 21` and `JDK 25` buttons run the same modeled
+blocking operation inside `synchronized`: JDK 21 retains the carrier in red,
+while JDK 25 moves the VT to the heap and releases the carrier. A pressure bar
+expands and contracts with the scheduler run queue. Completed VTs release their
+carrier, turn white, and dissolve in place.
 
 Four advanced chapters turn the machine into a performance lab:
 
@@ -160,10 +161,12 @@ runtime. After configuring an `xcrun notarytool` keychain profile, set
 `VT_MACHINE_NOTARY_PROFILE` and run `scripts/notarize-macos.sh` to submit,
 staple, and validate the bundle.
 
-## Java 25 accuracy note
+## JDK 21/25 accuracy note
 
-Since JDK 24, blocking in ordinary `synchronized` code no longer pins a virtual
-thread. The remaining pinning case demonstrated here is blocking while a native
-or foreign-function frame prevents unmounting. Virtual-thread stack chunks live
-on the heap; the 3D carrier lanes are a teaching abstraction, particularly in
-the live feed.
+JDK 21 pins a virtual thread when it blocks inside `synchronized`. Since JDK 24,
+JEP 491 allows that same operation to unmount, which is the JDK 25 behavior shown
+by the comparison controls. Native or foreign-function frames can still prevent
+unmounting on JDK 25. The version comparison is deterministic and therefore
+available in `SYNTHETIC` mode; `LIVE JDK` always reflects the host JDK. Virtual-
+thread stack chunks live on the heap, and the 3D carrier lanes are a teaching
+abstraction, particularly in the live feed.
