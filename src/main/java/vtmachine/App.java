@@ -31,6 +31,7 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
@@ -127,7 +128,7 @@ public final class App extends Application {
         machine = new MachineScene(sim);
         Hud.Actions actions = new Hud.Actions(this::togglePlayPause, this::gotoChapter, this::setFreeRun,
                 this::switchLiveMode, () -> submitTasks(25), this::forcePark, this::forcePin,
-                this::showSettings, machine::highlightVt, this::showReplayFrame,
+                this::showSettings, this::showAbout, machine::highlightVt, this::showReplayFrame,
                 this::returnLive, machine::requestFocus);
         hud = new Hud(sim, replayTimeline, actions);
         StackPane machineAndNarration = new StackPane(machine, hud.narration());
@@ -442,6 +443,34 @@ public final class App extends Application {
                     selectedSeed, live.isSelected(), settings.presenter, null, 4.5, 0, false, false));
             machine.requestFocus();
         });
+    }
+
+    private void showAbout() {
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.initOwner(stage);
+        dialog.setTitle("About The Virtual Thread Machine");
+        dialog.setHeaderText("Making Java virtual threads visible");
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+
+        Label purpose = new Label(
+                "The Virtual Thread Machine is an educational 3D simulation that makes "
+                + "mounting, parking, resuming, pinning, carrier scheduling, external I/O, "
+                + "and structured concurrency easier to see and explain. It is a teaching "
+                + "tool, not a production JVM profiler.");
+        purpose.setWrapText(true);
+        purpose.setPrefWidth(470);
+
+        Label creator = new Label("Built by Bazlur Rahman");
+        creator.getStyleClass().add("about-creator");
+        Label contact = new Label("bazlur@bazlur.dev");
+        contact.getStyleClass().add("about-contact");
+
+        VBox content = new VBox(12, purpose, creator, contact);
+        content.getStyleClass().add("about-content");
+        dialog.getDialogPane().getStylesheets().add(resource("/hud.css"));
+        dialog.getDialogPane().setContent(content);
+        dialog.showAndWait();
+        machine.requestFocus();
     }
 
     @Override

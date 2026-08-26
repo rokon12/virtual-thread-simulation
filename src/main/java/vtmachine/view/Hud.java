@@ -57,7 +57,7 @@ public final class Hud {
 
     public record Actions(Runnable playPause, IntConsumer chapter, Consumer<Boolean> freeRun,
             Consumer<Boolean> liveMode, Runnable burst, Runnable park, Runnable pin,
-            Runnable settings, LongConsumer highlight, IntConsumer replayFrame,
+            Runnable settings, Runnable about, LongConsumer highlight, IntConsumer replayFrame,
             Runnable returnLive, Runnable refocus) {}
 
     private final Sim sim;
@@ -274,6 +274,8 @@ public final class Hud {
                 "Demonstrate one native or foreign-function pin");
         Button settings = controlButton("Settings", "settings-button", actions.settings,
                 "Change carrier count, task limit, task rate, and random seed");
+        Button about = controlButton("About", "about-button", actions.about,
+                "Learn who built the simulator and why it exists");
         VBox timelineControl = buildTimelineControl();
         HBox.setHgrow(timelineControl, Priority.ALWAYS);
         performance.getStyleClass().add("performance-label");
@@ -292,7 +294,7 @@ public final class Hud {
         });
         speedReadout.getStyleClass().add("speed-readout");
         speedReadout.setMinWidth(44);
-        bar.getChildren().addAll(playButton, burst, park, pin, settings, timelineControl,
+        bar.getChildren().addAll(playButton, burst, park, pin, settings, about, timelineControl,
                 performance, speedLabel, speedSlider, speedReadout);
         return bar;
     }

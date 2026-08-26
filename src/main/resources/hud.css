@@ -274,10 +274,55 @@
     -fx-text-fill: #fca5a5;
 }
 
-.settings-button {
+.settings-button, .about-button {
     -fx-background-color: #171c24;
     -fx-border-color: #344153;
     -fx-text-fill: #b6c6d8;
+}
+
+.dialog-pane {
+    -fx-background-color: #0a1019;
+    -fx-border-color: #1a2735;
+    -fx-border-width: 1;
+}
+
+.dialog-pane > .header-panel {
+    -fx-background-color: #0d1520;
+}
+
+.dialog-pane > .header-panel .label {
+    -fx-font-size: 17px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #e6edf3;
+}
+
+.dialog-pane .button {
+    -fx-background-color: #0f2b21;
+    -fx-border-color: #2a5c48;
+    -fx-border-radius: 7;
+    -fx-background-radius: 7;
+    -fx-text-fill: #6ee7b7;
+}
+
+.about-content {
+    -fx-padding: 4 2 6 2;
+    -fx-font-family: "Space Grotesk";
+}
+
+.about-content > .label {
+    -fx-text-fill: #c4d3e3;
+}
+
+.about-creator {
+    -fx-font-size: 15px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #34d399;
+}
+
+.about-contact {
+    -fx-font-family: "IBM Plex Mono";
+    -fx-font-size: 12px;
+    -fx-text-fill: #8ea2b8;
 }
 
 .performance-label, .diagnostics-label {

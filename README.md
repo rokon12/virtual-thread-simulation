@@ -7,6 +7,14 @@ simulation as its behavioral reference.
 
 ![The Virtual Thread Machine demonstrating parking, downstream limits, structured scopes, and historical timeline replay](docs/media/virtual-thread-machine-demo.gif)
 
+## About
+
+Built by **Bazlur Rahman** (`bazlur@bazlur.dev`), The Virtual Thread Machine is
+an educational tool for making normally invisible virtual-thread behavior easy
+to see and explain. It visualizes mounting, parking, resuming, pinning, carrier
+scheduling, external I/O, downstream limits, and structured concurrency. It is
+a teaching simulation rather than a production JVM profiler.
+
 ## Run
 
 Requirements: JDK 25 and Maven 3.9+.
@@ -49,7 +57,8 @@ expose ordinary virtual-thread carrier identity.
   each state
 - `Esc` or the lifecycle card's × button: stop following a VT
 - HUD controls: switch synthetic/live feeds, add 25 tasks, force a park or
-  demonstration pin, change speed, or restart with new demo settings
+  demonstration pin, change speed, restart with new demo settings, or open the
+  About dialog
 
 The sidebar includes live total, carrier utilization, average I/O, event-log
 highlighting, and a rolling completions/second chart. `AUTO` render quality
