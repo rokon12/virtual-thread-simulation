@@ -131,6 +131,8 @@ public final class App extends Application {
                 this::switchLiveMode, () -> submitTasks(25), this::forcePark,
                 this::demonstrateJdk21SynchronizedBlock, this::demonstrateJdk25SynchronizedBlock,
                 this::startJdkShowdown,
+                this::cycleStructuredPolicy, this::injectStructuredFailure,
+                this::cancelStructuredParent, this::restartStructuredStory,
                 this::showSettings, this::showAbout, machine::highlightVt, this::showReplayFrame,
                 this::returnLive, machine::requestFocus);
         hud = new Hud(sim, replayTimeline, actions);
@@ -385,6 +387,32 @@ public final class App extends Application {
     private void startJdkShowdown() {
         if (replaying) returnLive();
         if (sim.startJdkShowdown()) captureReplayNow();
+    }
+
+    private void cycleStructuredPolicy() {
+        if (replaying) returnLive();
+        if (sim.cycleStructuredPolicy()) {
+            chapterWallTime = 0;
+            captureReplayNow();
+        }
+    }
+
+    private void injectStructuredFailure() {
+        if (replaying) returnLive();
+        if (sim.injectStructuredFailure()) captureReplayNow();
+    }
+
+    private void cancelStructuredParent() {
+        if (replaying) returnLive();
+        if (sim.cancelStructuredParent()) captureReplayNow();
+    }
+
+    private void restartStructuredStory() {
+        if (replaying) returnLive();
+        if (sim.restartStructuredStory()) {
+            chapterWallTime = 0;
+            captureReplayNow();
+        }
     }
 
     private void setFreeRun(boolean enabled) {

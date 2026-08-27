@@ -38,6 +38,15 @@ public final class Sim {
             double pinnedThreadSeconds, double parkedThreadSeconds) {}
     public record ScopeStats(int id, String name, int total, int active,
             int succeeded, int failed, int cancelled, boolean joined) {}
+    public record StructuredStory(JoinPolicy policy, StructuredStage stage,
+            String userContext, String traceContext, int structuredOrphans,
+            int unstructuredOrphans, boolean failureObserved, boolean parentCancelled,
+            boolean contextReleased) {
+        private static StructuredStory inactive() {
+            return new StructuredStory(JoinPolicy.SHUTDOWN_ON_FAILURE, StructuredStage.INACTIVE,
+                    "", "", 0, 0, false, false, false);
+        }
+    }
     public record JdkShowdown(boolean active, double elapsed, int totalTasks,
             int jdk21Completed, int jdk21Queued, boolean jdk21Pinned,
             int jdk25Completed, int jdk25Queued, boolean jdk25Parked) {
@@ -56,6 +65,32 @@ public final class Sim {
 
     public enum Outcome {
         ACTIVE, COMPLETED, FAILED, CANCELLED
+    }
+
+    public enum JoinPolicy {
+        SHUTDOWN_ON_FAILURE("FAILURE", "Shutdown on failure"),
+        SHUTDOWN_ON_SUCCESS("FIRST RESULT", "Shutdown on success"),
+        AWAIT_ALL("ALL RESULTS", "Await every child");
+
+        private final String shortDisplay;
+        private final String display;
+
+        JoinPolicy(String shortDisplay, String display) {
+            this.shortDisplay = shortDisplay;
+            this.display = display;
+        }
+
+        public String shortDisplay() { return shortDisplay; }
+        public String display() { return display; }
+    }
+
+    public enum StructuredStage {
+        INACTIVE(""), FORK("FORK"), RUN("RUN"), FAIL("FAIL"), CANCEL("CANCEL"),
+        JOIN("JOIN"), CLOSE("CLOSE"), SUMMARY("SUMMARY");
+
+        private final String display;
+        StructuredStage(String display) { this.display = display; }
+        public String display() { return display; }
     }
 
     public enum TaskProfile {
@@ -153,6 +188,11 @@ public final class Sim {
     private int scenarioSpawned;
     private int permitsInUse;
     private Vt hero;
+    private JoinPolicy structuredPolicy = JoinPolicy.SHUTDOWN_ON_FAILURE;
+    private boolean structuredParentCancelled;
+    private double structuredFailureAt = -1;
+    private double structuredCancellationAt = -1;
+    private double structuredClosedAt = -1;
 
     private static final class ScopeProgress {
         final int id;
@@ -695,6 +735,10 @@ public final class Sim {
         completed++;
         recordScopeOutcome(vt);
         addLog("VT-" + vt.id + " completed · C" + (carrier.index() + 1) + " free · terminated");
+        if (scenario == Scenario.STRUCTURED
+                && structuredPolicy == JoinPolicy.SHUTDOWN_ON_SUCCESS && vt.scopeId > 0) {
+            cancelScope(vt.scopeId, vt, "first successful result selected");
+        }
     }
 
     private void fail(Vt vt, Carrier carrier) {
@@ -704,25 +748,38 @@ public final class Sim {
         vt.tween = null;
         vt.outcome = Outcome.FAILED;
         vt.transitionTo(VtState.DONE, time);
+        if (structuredFailureAt < 0) structuredFailureAt = time;
         recordScopeOutcome(vt);
-        addLog("VT-" + vt.id + " failed · scope " + vt.scopeId + " cancelling siblings");
-        cancelScope(vt.scopeId, vt);
+        if (structuredPolicy == JoinPolicy.SHUTDOWN_ON_FAILURE) {
+            addLog("VT-" + vt.id + " failed · scope " + vt.scopeId + " cancelling siblings");
+            cancelScope(vt.scopeId, vt, "failure propagated");
+        } else {
+            addLog("VT-" + vt.id + " failed · scope " + vt.scopeId + " keeps awaiting children");
+        }
     }
 
-    private void cancelScope(int scopeId, Vt failed) {
+    private void cancelScope(int scopeId, Vt trigger, String reason) {
+        int cancelled = 0;
         for (Vt sibling : vts) {
-            if (sibling == failed || sibling.scopeId != scopeId || sibling.outcome != Outcome.ACTIVE) continue;
-            if (sibling.carrier != null) sibling.carrier.mounted = null;
-            sibling.carrier = null;
-            queue.remove(sibling);
-            permitWaiters.remove(sibling);
-            releasePermit(sibling);
-            sibling.tween = null;
-            sibling.outcome = Outcome.CANCELLED;
-            sibling.transitionTo(VtState.DONE, time);
-            recordScopeOutcome(sibling);
+            if (sibling == trigger || sibling.scopeId != scopeId || sibling.outcome != Outcome.ACTIVE) continue;
+            cancelStructuredChild(sibling);
+            cancelled++;
         }
-        addLog("scope " + scopeId + " joined exceptionally");
+        if (cancelled > 0 && structuredCancellationAt < 0) structuredCancellationAt = time;
+        if (cancelled > 0) addLog("scope " + scopeId + " cancelled " + cancelled + " sibling"
+                + (cancelled == 1 ? "" : "s") + " · " + reason);
+    }
+
+    private void cancelStructuredChild(Vt child) {
+        if (child.carrier != null) child.carrier.mounted = null;
+        child.carrier = null;
+        queue.remove(child);
+        permitWaiters.remove(child);
+        releasePermit(child);
+        child.tween = null;
+        child.outcome = Outcome.CANCELLED;
+        child.transitionTo(VtState.DONE, time);
+        recordScopeOutcome(child);
     }
 
     private void recordScopeOutcome(Vt vt) {
@@ -737,6 +794,15 @@ public final class Sim {
         }
         if (scope.terminal() == scope.total) {
             addLog("scope " + scope.id + (scope.failed > 0 ? " joined with failure" : " joined successfully"));
+        }
+        updateStructuredClose();
+    }
+
+    private void updateStructuredClose() {
+        if (scenario == Scenario.STRUCTURED && structuredClosedAt < 0 && !scopes.isEmpty()
+                && scopes.values().stream().allMatch(scope -> scope.terminal() == scope.total)) {
+            structuredClosedAt = time;
+            addLog("parent scope closed · context released · 0 orphaned tasks");
         }
     }
 
@@ -926,15 +992,102 @@ public final class Sim {
             }
             case 9 -> {
                 scenario = Scenario.STRUCTURED;
-                scenarioSubmitted = 12;
-                scopes.put(1, new ScopeProgress(1, "SEARCH", 4));
-                scopes.put(2, new ScopeProgress(2, "CHECKOUT", 4));
-                scopes.put(3, new ScopeProgress(3, "REPORT", 4));
-                if (!liveMode) burst += scenarioSubmitted;
-                addLog("chapter: structured scopes — fork, cancel, join");
+                structuredPolicy = JoinPolicy.SHUTDOWN_ON_FAILURE;
+                startStructuredStory();
             }
             default -> throw new AssertionError("unreachable");
         }
+    }
+
+    private void startStructuredStory() {
+        scenarioSubmitted = 12;
+        scenarioSpawned = 0;
+        structuredParentCancelled = false;
+        structuredFailureAt = -1;
+        structuredCancellationAt = -1;
+        structuredClosedAt = -1;
+        scopes.clear();
+        scopes.put(1, new ScopeProgress(1, "SEARCH", 4));
+        scopes.put(2, new ScopeProgress(2, "CHECKOUT", 4));
+        scopes.put(3, new ScopeProgress(3, "REPORT", 4));
+        if (!liveMode) burst += scenarioSubmitted;
+        addLog("structured: " + structuredPolicy.display() + " · fork 3 scopes / 12 children");
+    }
+
+    /** Restarts Chapter 10 with the next StructuredTaskScope-style join policy. */
+    public boolean cycleStructuredPolicy() {
+        if (scenario != Scenario.STRUCTURED || liveMode) {
+            addLog("join policy controls are available in synthetic structured mode");
+            return false;
+        }
+        structuredPolicy = JoinPolicy.values()[(structuredPolicy.ordinal() + 1) % JoinPolicy.values().length];
+        clearWorkload();
+        scenario = Scenario.STRUCTURED;
+        chapterStartedAt = time;
+        startStructuredStory();
+        return true;
+    }
+
+    /** Restarts the deterministic Chapter 10 story without changing its selected policy. */
+    public boolean restartStructuredStory() {
+        if (scenario != Scenario.STRUCTURED || liveMode) return false;
+        clearWorkload();
+        scenario = Scenario.STRUCTURED;
+        chapterStartedAt = time;
+        startStructuredStory();
+        return true;
+    }
+
+    /** Fails one active CHECKOUT child so the selected join policy becomes visible immediately. */
+    public boolean injectStructuredFailure() {
+        if (scenario != Scenario.STRUCTURED || liveMode) return false;
+        Vt target = vts.stream()
+                .filter(vt -> vt.scopeId == 2 && vt.outcome == Outcome.ACTIVE && vt.carrier != null)
+                .findFirst()
+                .orElseGet(() -> vts.stream()
+                        .filter(vt -> vt.scopeId == 2 && vt.outcome == Outcome.ACTIVE)
+                        .findFirst().orElse(null));
+        if (target == null) {
+            addLog("CHECKOUT has no active child to fail · replay the story");
+            return false;
+        }
+        if (target.carrier != null) {
+            fail(target, target.carrier);
+        } else {
+            queue.remove(target);
+            permitWaiters.remove(target);
+            releasePermit(target);
+            target.tween = null;
+            target.outcome = Outcome.FAILED;
+            target.transitionTo(VtState.DONE, time);
+            structuredFailureAt = time;
+            recordScopeOutcome(target);
+            addLog("VT-" + target.id + " injected failure · scope " + target.scopeId);
+            if (structuredPolicy == JoinPolicy.SHUTDOWN_ON_FAILURE) {
+                cancelScope(target.scopeId, target, "failure propagated");
+            }
+        }
+        return true;
+    }
+
+    /** Cancels the parent scope and every active child, demonstrating downward cancellation. */
+    public boolean cancelStructuredParent() {
+        if (scenario != Scenario.STRUCTURED || liveMode) return false;
+        int cancelled = 0;
+        structuredParentCancelled = true;
+        for (Vt child : vts) {
+            if (child.scopeId <= 0 || child.outcome != Outcome.ACTIVE) continue;
+            cancelStructuredChild(child);
+            cancelled++;
+        }
+        if (cancelled > 0) {
+            structuredCancellationAt = time;
+            addLog("parent cancelled · " + cancelled + " active children interrupted");
+        } else {
+            addLog("parent already closed · replay the story to cancel it");
+        }
+        updateStructuredClose();
+        return cancelled > 0;
     }
 
     public void setFreeRun(boolean enabled) {
@@ -1017,6 +1170,10 @@ public final class Sim {
         pendingJdkComparison = JdkComparison.NONE;
         jdkComparison = JdkComparison.NONE;
         jdkShowdownStartedAt = -1;
+        structuredParentCancelled = false;
+        structuredFailureAt = -1;
+        structuredCancellationAt = -1;
+        structuredClosedAt = -1;
         for (Carrier carrier : carriers) {
             carrier.mounted = null;
             carrier.pinT = 0;
@@ -1150,6 +1307,35 @@ public final class Sim {
 
     public List<ScopeStats> structuredScopes() {
         return scopes.values().stream().map(ScopeProgress::snapshot).toList();
+    }
+
+    public StructuredStory structuredStory() {
+        if (scenario != Scenario.STRUCTURED) return StructuredStory.inactive();
+        boolean joined = !scopes.isEmpty()
+                && scopes.values().stream().allMatch(scope -> scope.terminal() == scope.total);
+        StructuredStage stage;
+        if (structuredFailureAt >= 0 && time - structuredFailureAt < 0.75) {
+            stage = StructuredStage.FAIL;
+        } else if (structuredCancellationAt >= 0
+                && (structuredClosedAt < 0 || time - structuredCancellationAt < 1.5)) {
+            stage = StructuredStage.CANCEL;
+        } else if (structuredFailureAt >= 0 && structuredClosedAt < 0) {
+            stage = StructuredStage.FAIL;
+        } else if (structuredClosedAt >= 0) {
+            double sequenceStartedAt = Math.max(structuredClosedAt,
+                    structuredCancellationAt < 0 ? structuredClosedAt : structuredCancellationAt + 1.5);
+            double closeAge = Math.max(0, time - sequenceStartedAt);
+            stage = closeAge < 0.75 ? StructuredStage.JOIN
+                    : closeAge < 1.45 ? StructuredStage.CLOSE : StructuredStage.SUMMARY;
+        } else if (chapterAge() < 1.2 || scenarioSpawned < scenarioSubmitted) {
+            stage = StructuredStage.FORK;
+        } else {
+            stage = joined ? StructuredStage.JOIN : StructuredStage.RUN;
+        }
+        int unstructuredOrphans = chapterAge() < 1.2 ? 0 : 3;
+        return new StructuredStory(structuredPolicy, stage, "USER-7", "TRACE-4F2A", 0,
+                unstructuredOrphans, structuredFailureAt >= 0, structuredParentCancelled,
+                structuredClosedAt >= 0);
     }
 
     /**

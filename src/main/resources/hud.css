@@ -308,6 +308,36 @@
     -fx-text-fill: #f5d0fe;
 }
 
+.structured-policy-button, .structured-failure-button,
+.structured-cancel-button, .structured-replay-button {
+    -fx-font-size: 11px;
+    -fx-padding: 8 10 8 10;
+}
+
+.structured-policy-button {
+    -fx-background-color: #13233b;
+    -fx-border-color: #3f6595;
+    -fx-text-fill: #93c5fd;
+}
+
+.structured-failure-button {
+    -fx-background-color: #2b0f18;
+    -fx-border-color: #713448;
+    -fx-text-fill: #fca5a5;
+}
+
+.structured-cancel-button {
+    -fx-background-color: #2b2110;
+    -fx-border-color: #6f5425;
+    -fx-text-fill: #fcd58a;
+}
+
+.structured-replay-button {
+    -fx-background-color: #102a23;
+    -fx-border-color: #2a5c48;
+    -fx-text-fill: #6ee7b7;
+}
+
 .settings-button, .about-button {
     -fx-background-color: #171c24;
     -fx-border-color: #344153;

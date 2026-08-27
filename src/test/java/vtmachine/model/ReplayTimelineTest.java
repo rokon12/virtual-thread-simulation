@@ -83,6 +83,26 @@ class ReplayTimelineTest {
         });
     }
 
+    @Test
+    void structuredPresentationStateIsCapturedImmutably() {
+        Sim sim = new Sim(4, 100, 1.4, 95);
+        advance(sim, 3.1);
+        sim.gotoChapter(9);
+        advance(sim, 0.3);
+        ReplayTimeline timeline = new ReplayTimeline();
+        timeline.capture(sim, true);
+
+        assertEquals(Sim.JoinPolicy.SHUTDOWN_ON_FAILURE,
+                timeline.latest().structuredStory().policy());
+        assertTrue(sim.cycleStructuredPolicy());
+        timeline.capture(sim, true);
+
+        assertEquals(Sim.JoinPolicy.SHUTDOWN_ON_FAILURE,
+                timeline.frame(0).structuredStory().policy());
+        assertEquals(Sim.JoinPolicy.SHUTDOWN_ON_SUCCESS,
+                timeline.latest().structuredStory().policy());
+    }
+
     private static void advance(Sim sim, double seconds) {
         for (int i = 0; i < Math.ceil(seconds / STEP); i++) sim.tick(STEP);
     }

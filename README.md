@@ -137,8 +137,14 @@ Four advanced chapters turn the machine into a performance lab:
   are enforced by a fair `Semaphore`, so the wait is performed by real VTs.
 - `CPU BOUND` saturates the carriers with compute-only tasks and plots the
   throughput plateau at the carrier/core count.
-- `STRUCTURED` groups child VTs under parent scopes, shows joins, and contains a
-  child failure by cancelling only its active siblings.
+- `STRUCTURED` turns the final chapter into an interactive presentation lab. A
+  structured scope tree is contrasted with orphan-prone unstructured tasks; an
+  animated `FORK → RUN → FAIL → CANCEL → JOIN → CLOSE` timeline follows the
+  lifetime, inherited user/trace context is released on close, and the final
+  card holds the invariant that no child outlives its parent. Chapter-only
+  controls cycle `Shutdown on failure`, `Shutdown on success`, and `Await all`
+  policies, inject a CHECKOUT failure, cancel the parent, or replay the story.
+  Every policy and choreography state is captured in replay history.
 
 ## Reproducible settings
 

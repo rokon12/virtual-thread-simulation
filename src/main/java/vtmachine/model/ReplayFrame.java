@@ -16,6 +16,7 @@ import vtmachine.model.Sim.ResourcePoolStats;
 import vtmachine.model.Sim.Scenario;
 import vtmachine.model.Sim.ScopeStats;
 import vtmachine.model.Sim.Stats;
+import vtmachine.model.Sim.StructuredStory;
 import vtmachine.model.Sim.TaskProfile;
 import vtmachine.model.Sim.VtState;
 
@@ -25,7 +26,7 @@ public record ReplayFrame(double time, double bootT, int chapter, double chapter
         JdkShowdown jdkShowdown, int scenarioSubmitted,
         Stats stats, ConsequenceStats consequenceStats, ProfileStats profileStats, double averageIoSeconds,
         double carrierUtilization, ResourcePoolStats resourcePoolStats,
-        List<ScopeStats> structuredScopes, List<String> log,
+        List<ScopeStats> structuredScopes, StructuredStory structuredStory, List<String> log,
         Map<Flash, Double> flashAges, List<CarrierFrame> carriers,
         List<ThreadFrame> vts) {
 
@@ -81,7 +82,7 @@ public record ReplayFrame(double time, double bootT, int chapter, double chapter
                 sim.maxThreads(), sim.scenario(), sim.jdkComparison(), sim.jdkShowdown(),
                 sim.scenarioSubmitted(), sim.stats(), sim.consequenceStats(),
                 sim.profileStats(), sim.averageIoSeconds(), sim.carrierUtilization(),
-                sim.resourcePoolStats(), sim.structuredScopes(), List.copyOf(sim.log()),
+                sim.resourcePoolStats(), sim.structuredScopes(), sim.structuredStory(), List.copyOf(sim.log()),
                 Map.copyOf(flashAges), carrierFrames, threadFrames);
     }
 }

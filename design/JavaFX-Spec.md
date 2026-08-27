@@ -92,7 +92,7 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 | 7 | PLATFORM vs VT | clear workload; submit the same I/O-bound task count to the virtual-thread model; show the platform-thread baseline | overview |
 | 8 | POOL LIMIT | clear workload; submit database I/O tasks behind three connection permits | heap |
 | 9 | CPU BOUND | clear workload; submit compute-only tasks at 6× carrier count | overview |
-| 10 | STRUCTURED | clear workload; fork three four-child scopes; fail one CHECKOUT child and cancel its active siblings | overview |
+| 10 | STRUCTURED | clear workload; fork three four-child scopes; animate scope lifetime and contrast it with orphan-prone unstructured tasks; expose join policy, failure, parent cancellation, and replay controls | overview |
 
 ## 4 · HUD & Controls
 
@@ -362,7 +362,7 @@ Threading rule: everything above runs on the FX Application Thread. The only cro
 | 7 PLATFORM vs VT | Run the same blocking I/O workload two ways. A platform-thread-per-task design ties up one costly OS thread per wait; virtual threads park cheaply while a small, fixed carrier pool keeps executing other work. |
 | 8 POOL LIMIT | Virtual threads remove the thread bottleneck, not downstream limits. Only three tasks may hold a database connection; every other VT parks in the heap without occupying a carrier until a permit becomes available. |
 | 9 CPU BOUND | Virtual threads improve blocking concurrency, not CPU parallelism. Compute-only tasks saturate every carrier and the run queue grows, but throughput plateaus at the available carrier/core count. |
-| 10 STRUCTURED | Related child VTs live inside parent scopes. Each scope forks four children and joins only after they finish; when one CHECKOUT child fails, its active siblings are cancelled and the failure is contained within that scope. |
+| 10 STRUCTURED | Related child VTs live inside parent scopes. The presentation contrasts them with unstructured orphan tasks, follows `FORK → RUN → FAIL → CANCEL → JOIN → CLOSE`, shows inherited user/trace context, and holds the closing invariant that no child outlives its parent. Controls compare shutdown-on-failure, shutdown-on-success, and await-all policies; inject a CHECKOUT failure; cancel the parent; or replay the deterministic story. |
 
 | Legend card | Body text |
 |---|---|
@@ -391,7 +391,7 @@ Acceptance — matches the HTML reference sim when:
 - [ ] Platform comparison: identical I/O task counts show N platform OS threads versus the configured fixed carrier count
 - [ ] Pool limit: at most three DB permits are active; extra VTs remain parked and carriers continue draining work
 - [ ] CPU bound: all carriers stay busy, no tasks park, and the queue grows beyond the carrier count
-- [ ] Structured: three four-child scope trees render; CHECKOUT records one failure, cancels active siblings, and joins exceptionally
+- [ ] Structured: three four-child scope trees render inside an animated parent boundary; the lifecycle timeline, inherited context, failure/cancellation propagation, join-policy comparison, unstructured orphan contrast, held closing summary, chapter-only controls, and replay state all remain deterministic
 - [ ] Replay: scrubbing pauses the live model and updates 3D/HUD/log/notes from immutable frames; playing advances recorded frames; LIVE restores the untouched live state and previous running/auto-play flags
 - [ ] Hero: exactly one trail at a time; new hero auto-picked after previous completes
 - [ ] Input: SPACE, ←/→, 1–4, drag orbit (φ clamped 0.15–1.45), scroll zoom (80–480), hover tooltip on any sphere

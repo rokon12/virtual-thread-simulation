@@ -227,6 +227,54 @@ class SimTest {
     }
 
     @Test
+    void structuredJoinPoliciesProduceDifferentSiblingOutcomes() {
+        Sim sim = new Sim(4, 100, 1.4, 405);
+        advance(sim, 3.1);
+        sim.gotoChapter(9);
+
+        assertEquals(Sim.JoinPolicy.SHUTDOWN_ON_FAILURE, sim.structuredStory().policy());
+        assertTrue(sim.cycleStructuredPolicy());
+        assertEquals(Sim.JoinPolicy.SHUTDOWN_ON_SUCCESS, sim.structuredStory().policy());
+        advance(sim, 8.0);
+        assertTrue(sim.structuredScopes().stream().allMatch(Sim.ScopeStats::joined));
+        assertTrue(sim.structuredScopes().stream().allMatch(scope -> scope.succeeded() == 1));
+        assertTrue(sim.structuredScopes().stream().allMatch(scope -> scope.cancelled() == 3));
+        assertEquals(0, sim.structuredStory().structuredOrphans());
+
+        assertTrue(sim.cycleStructuredPolicy());
+        assertEquals(Sim.JoinPolicy.AWAIT_ALL, sim.structuredStory().policy());
+        advance(sim, 0.25);
+        assertTrue(sim.injectStructuredFailure());
+        advance(sim, 20.0);
+        assertTrue(sim.structuredScopes().stream().allMatch(Sim.ScopeStats::joined));
+        assertEquals(0, sim.structuredScopes().stream().mapToInt(Sim.ScopeStats::cancelled).sum());
+        assertTrue(sim.structuredScopes().stream().mapToInt(Sim.ScopeStats::failed).sum() >= 1);
+        assertTrue(sim.structuredStory().contextReleased());
+        assertTrue(sim.invariantViolations().isEmpty());
+    }
+
+    @Test
+    void cancellingStructuredParentInterruptsEveryActiveChildAndLeavesNoOrphans() {
+        Sim sim = new Sim(4, 100, 1.4, 406);
+        advance(sim, 3.1);
+        sim.gotoChapter(9);
+        advance(sim, 0.3);
+
+        assertTrue(sim.cancelStructuredParent());
+        assertTrue(sim.structuredStory().parentCancelled());
+        assertEquals(Sim.StructuredStage.CANCEL, sim.structuredStory().stage());
+        assertEquals(0, sim.structuredStory().structuredOrphans());
+        assertTrue(sim.structuredScopes().stream().allMatch(Sim.ScopeStats::joined));
+        assertTrue(sim.structuredScopes().stream().allMatch(scope -> scope.active() == 0));
+        advance(sim, 1.6);
+        assertEquals(Sim.StructuredStage.JOIN, sim.structuredStory().stage());
+        advance(sim, 1.5);
+        assertEquals(Sim.StructuredStage.SUMMARY, sim.structuredStory().stage());
+        assertTrue(sim.structuredStory().contextReleased());
+        assertTrue(sim.invariantViolations().isEmpty());
+    }
+
+    @Test
     void scaleChapterFillsButNeverExceedsTheConfiguredPool() {
         Sim sim = new Sim(4, 50, 1.4, 11);
         advance(sim, 3.1);

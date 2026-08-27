@@ -52,12 +52,14 @@ public final class Hud {
         "Run the same blocking I/O workload two ways. A platform-thread-per-task design ties up one costly OS thread per wait; virtual threads park cheaply while a small, fixed carrier pool keeps executing other work.",
         "Virtual threads remove the thread bottleneck, not downstream limits. Only three tasks may hold a database connection; every other VT parks in the heap without occupying a carrier until a permit becomes available.",
         "Virtual threads improve blocking concurrency, not CPU parallelism. Compute-only tasks saturate every carrier and the run queue grows, but throughput plateaus at the available carrier/core count.",
-        "Related child VTs live inside parent scopes. Each scope forks four children and joins only after they finish; when one CHECKOUT child fails, its active siblings are cancelled and the failure is contained within that scope."
+        "Structured concurrency makes task lifetime a tree: no child outlives its parent. Follow fork, failure, cancellation, join, close, and inherited-context release; then use the chapter controls to compare join policies, inject a failure, cancel the parent, or replay the deterministic story."
     };
 
     public record Actions(Runnable playPause, IntConsumer chapter, Consumer<Boolean> freeRun,
             Consumer<Boolean> liveMode, Runnable burst, Runnable park,
             Runnable jdk21Block, Runnable jdk25Block, Runnable jdkShowdown,
+            Runnable structuredPolicy, Runnable structuredFailure,
+            Runnable structuredCancel, Runnable structuredReplay,
             Runnable settings, Runnable about, LongConsumer highlight, IntConsumer replayFrame,
             Runnable returnLive, Runnable refocus) {}
 
@@ -73,9 +75,13 @@ public final class Hud {
     private final Label subtitle = new Label("Mount · Park · Resume · Pin — virtual threads on a tiny carrier pool, live in 3D");
     private final Label feedNotice = new Label();
     private final Button playButton = new Button("Pause");
+    private Button burstButton;
+    private Button parkButton;
     private Button jdk21Button;
     private Button jdk25Button;
     private Button jdkShowdownButton;
+    private Button structuredPolicyButton;
+    private HBox structuredControls;
     private final ToggleButton guided = new ToggleButton("GUIDED");
     private final ToggleButton freeRun = new ToggleButton("FREE RUN");
     private final ToggleButton synthetic = new ToggleButton("SYNTHETIC");
@@ -271,9 +277,9 @@ public final class Hud {
             sync();
             actions.refocus.run();
         });
-        Button burst = controlButton("+25 tasks", "burst-button", actions.burst,
+        burstButton = controlButton("+25 tasks", "burst-button", actions.burst,
                 "Submit 25 tasks to the selected workload");
-        Button park = controlButton("Force park", "park-button", actions.park,
+        parkButton = controlButton("Force park", "park-button", actions.park,
                 "Park one running virtual thread");
         jdk21Button = controlButton("JDK 21", "jdk21-button", actions.jdk21Block,
                 "JDK 21: blocking inside synchronized pins the virtual thread to its carrier");
@@ -281,6 +287,19 @@ public final class Hud {
                 "JDK 25: the same synchronized blocking operation unmounts and releases the carrier");
         jdkShowdownButton = controlButton("Showdown", "showdown-button", actions.jdkShowdown,
                 "Run the JDK 21 and JDK 25 synchronized-blocking behaviors side by side");
+        structuredPolicyButton = controlButton("Policy: Failure", "structured-policy-button",
+                actions.structuredPolicy, "Cycle the StructuredTaskScope join policy and replay the chapter");
+        Button structuredFailure = controlButton("Inject failure", "structured-failure-button",
+                actions.structuredFailure, "Fail one active CHECKOUT child now");
+        Button structuredCancel = controlButton("Cancel parent", "structured-cancel-button",
+                actions.structuredCancel, "Cancel the parent scope and interrupt every active child");
+        Button structuredReplay = controlButton("Replay story", "structured-replay-button",
+                actions.structuredReplay, "Restart the deterministic structured-concurrency story");
+        structuredControls = new HBox(6, structuredPolicyButton, structuredFailure,
+                structuredCancel, structuredReplay);
+        structuredControls.setAlignment(Pos.CENTER_LEFT);
+        structuredControls.setVisible(false);
+        structuredControls.setManaged(false);
         Button settings = controlButton("Settings", "settings-button", actions.settings,
                 "Change carrier count, task limit, task rate, and random seed");
         Button about = controlButton("About", "about-button", actions.about,
@@ -303,7 +322,8 @@ public final class Hud {
         });
         speedReadout.getStyleClass().add("speed-readout");
         speedReadout.setMinWidth(44);
-        bar.getChildren().addAll(playButton, burst, park, jdk21Button, jdk25Button, jdkShowdownButton,
+        bar.getChildren().addAll(playButton, burstButton, parkButton, jdk21Button, jdk25Button, jdkShowdownButton,
+                structuredControls,
                 settings, about, timelineControl,
                 performance, speedLabel, speedSlider, speedReadout);
         return bar;
@@ -491,6 +511,17 @@ public final class Hud {
                 + "\nMIX · FAST " + mix.fast() + " · CPU " + mix.compute()
                 + " · I/O " + mix.ioBound());
         int chapter = replayFrame == null ? sim.chapter() : replayFrame.chapter();
+        boolean structuredChapter = chapter == 9;
+        setShown(structuredControls, structuredChapter);
+        setShown(burstButton, !structuredChapter);
+        setShown(parkButton, !structuredChapter);
+        setShown(jdk21Button, !structuredChapter);
+        setShown(jdk25Button, !structuredChapter);
+        setShown(jdkShowdownButton, !structuredChapter);
+        Sim.StructuredStory structuredStory = replayFrame == null
+                ? sim.structuredStory() : replayFrame.structuredStory();
+        structuredPolicyButton.setText("Policy: " + structuredStory.policy().shortDisplay());
+        structuredControls.setDisable(displayedLive);
         chapterNumber.setText("CHAPTER " + (chapter + 1) + "/" + Sim.CHAPTER_COUNT);
         chapterTitle.setText(chapterTitle(chapter));
         chapterTitle.getStyleClass().removeIf(style -> style.startsWith("text-"));

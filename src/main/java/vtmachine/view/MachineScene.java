@@ -97,6 +97,7 @@ public final class MachineScene extends StackPane {
     private final Pane labelOverlay = new Pane();
     private final Canvas terminationCanvas = new Canvas();
     private final Canvas lessonCanvas = new Canvas(680, 168);
+    private final Canvas structuredCanvas = new Canvas(860, 338);
     private final Canvas jdkShowdownCanvas = new Canvas(760, 250);
     private final Canvas spotlightCanvas = new Canvas();
     private final Canvas continuationCanvas = new Canvas();
@@ -217,6 +218,9 @@ public final class MachineScene extends StackPane {
         lessonCanvas.setMouseTransparent(true);
         lessonCanvas.setAccessibleRole(AccessibleRole.TEXT);
         lessonCanvas.setVisible(false);
+        structuredCanvas.setMouseTransparent(true);
+        structuredCanvas.setAccessibleRole(AccessibleRole.TEXT);
+        structuredCanvas.setVisible(false);
         jdkShowdownCanvas.setMouseTransparent(true);
         jdkShowdownCanvas.setAccessibleRole(AccessibleRole.TEXT);
         jdkShowdownCanvas.setVisible(false);
@@ -266,7 +270,7 @@ public final class MachineScene extends StackPane {
 
         getChildren().addAll(subScene, terminationCanvas, labelOverlay, cameraButtons, presentationButtons, shortcut,
                 diagnostics, spotlightCanvas, continuationCanvas, comparisonOverlay,
-                lessonCanvas, jdkShowdownCanvas, finaleCanvas, consequenceCanvas, followOverlay);
+                lessonCanvas, structuredCanvas, jdkShowdownCanvas, finaleCanvas, consequenceCanvas, followOverlay);
         StackPane.setAlignment(cameraButtons, Pos.TOP_RIGHT);
         StackPane.setMargin(cameraButtons, new Insets(14, 16, 0, 0));
         StackPane.setAlignment(presentationButtons, Pos.TOP_RIGHT);
@@ -279,6 +283,8 @@ public final class MachineScene extends StackPane {
         StackPane.setMargin(comparisonOverlay, new Insets(14, 0, 0, 0));
         StackPane.setAlignment(lessonCanvas, Pos.TOP_CENTER);
         StackPane.setMargin(lessonCanvas, new Insets(56, 0, 0, 0));
+        StackPane.setAlignment(structuredCanvas, Pos.TOP_CENTER);
+        StackPane.setMargin(structuredCanvas, new Insets(48, 0, 0, 0));
         StackPane.setAlignment(jdkShowdownCanvas, Pos.TOP_CENTER);
         StackPane.setMargin(jdkShowdownCanvas, new Insets(54, 0, 0, 0));
         StackPane.setAlignment(followOverlay, Pos.TOP_LEFT);
@@ -1822,8 +1828,14 @@ public final class MachineScene extends StackPane {
 
     private void drawLessonOverlay() {
         Sim.Scenario scenario = displayScenario();
-        lessonCanvas.setVisible(scenario != Sim.Scenario.NONE);
+        boolean structured = scenario == Sim.Scenario.STRUCTURED;
+        lessonCanvas.setVisible(scenario != Sim.Scenario.NONE && !structured);
+        structuredCanvas.setVisible(structured);
         if (scenario == Sim.Scenario.NONE) return;
+        if (structured) {
+            drawStructuredPresentation();
+            return;
+        }
         GraphicsContext graphics = lessonCanvas.getGraphicsContext2D();
         double width = lessonCanvas.getWidth();
         double height = lessonCanvas.getHeight();
@@ -1837,7 +1849,7 @@ public final class MachineScene extends StackPane {
             case PLATFORM_COMPARISON -> drawPlatformComparison(graphics);
             case RESOURCE_POOL -> drawResourceLimit(graphics);
             case CPU_BOUND -> drawCpuPlateau(graphics);
-            case STRUCTURED -> drawStructuredScopes(graphics);
+            case STRUCTURED -> { }
             case NONE -> { }
         }
     }
@@ -1944,36 +1956,183 @@ public final class MachineScene extends StackPane {
                 + " tasks are queued. Throughput plateaus at the carrier and core count.");
     }
 
-    private void drawStructuredScopes(GraphicsContext graphics) {
-        lessonText(graphics, "STRUCTURED CONCURRENCY · FORK → CONTAIN → JOIN", 18, 22, GREEN, 11, true);
+    private void drawStructuredPresentation() {
+        GraphicsContext graphics = structuredCanvas.getGraphicsContext2D();
+        double width = structuredCanvas.getWidth();
+        double height = structuredCanvas.getHeight();
+        Sim.StructuredStory story = displayStructuredStory();
+        graphics.clearRect(0, 0, width, height);
+        graphics.setFill(Color.web("#07101c", 0.96));
+        graphics.fillRoundRect(0, 0, width, height, 20, 20);
+        graphics.setStroke(Color.web("#30445d", 0.95));
+        graphics.setLineWidth(1.2);
+        graphics.strokeRoundRect(0.6, 0.6, width - 1.2, height - 1.2, 20, 20);
+
+        lessonText(graphics, "STRUCTURED CONCURRENCY · LIFETIME IS A TREE", 18, 23, GREEN, 11, true);
+        lessonText(graphics, "POLICY · " + story.policy().display().toUpperCase(Locale.ROOT),
+                520, 23, AMBER, 9, true);
+        contextBadge(graphics, story.userContext(), 18, 32, BLUE);
+        contextBadge(graphics, story.traceContext(), 102, 32, PURPLE);
+        lessonText(graphics, story.contextReleased() ? "CONTEXT RELEASED ON CLOSE" : "INHERITED BY EVERY CHILD",
+                206, 44, story.contextReleased() ? GREEN : Color.web("#8ea2b8"), 8, true);
+
+        drawUnstructuredContrast(graphics, story, 18, 58, 205, 155);
+        drawStructuredScopePanel(graphics, story, 238, 58, 604, 155);
+        drawStructuredTimeline(graphics, story, 18, 232, 824);
+        drawStructuredSummary(graphics, story, 18, 278, 824, 45);
+
+        structuredCanvas.setAccessibleText("Structured concurrency presentation. Policy "
+                + story.policy().display() + ". Stage " + story.stage().display() + ". Three parent scopes, "
+                + story.structuredOrphans() + " orphaned structured tasks, compared with "
+                + story.unstructuredOrphans() + " orphaned tasks in the unstructured contrast. "
+                + (story.contextReleased() ? "Inherited context has been released." : "Context is inherited by children."));
+    }
+
+    private void drawUnstructuredContrast(GraphicsContext graphics, Sim.StructuredStory story,
+            double x, double y, double width, double height) {
+        graphics.setFill(Color.web("#190f18", 0.88));
+        graphics.fillRoundRect(x, y, width, height, 14, 14);
+        graphics.setStroke(Color.web("#7f3346", 0.8));
+        graphics.setLineDashes(5, 5);
+        graphics.strokeRoundRect(x + 0.5, y + 0.5, width - 1, height - 1, 14, 14);
+        graphics.setLineDashes();
+        lessonText(graphics, "UNSTRUCTURED", x + 12, y + 20, RED, 9, true);
+        lessonText(graphics, "PARENT RETURNED", x + 12, y + 37, Color.web("#a8848f"), 8, false);
+
+        double parentX = x + 46;
+        double parentY = y + 72;
+        graphics.setFill(Color.web("#572438"));
+        graphics.fillRoundRect(parentX - 22, parentY - 10, 44, 20, 6, 6);
+        lessonText(graphics, "P", parentX - 3, parentY + 4, WHITE, 8, true);
+        graphics.setStroke(Color.web("#925069", 0.65));
+        for (int child = 0; child < 3; child++) {
+            double phase = displayTime() * (1.2 + child * 0.14) + child * 2.1;
+            double childX = x + 114 + child * 24 + Math.sin(phase) * 6;
+            double childY = y + 62 + child * 20 + Math.cos(phase * 0.8) * 7;
+            graphics.strokeLine(parentX + 23, parentY, childX - 6, childY);
+            graphics.setFill(RED.deriveColor(0, 1, 1, 0.82));
+            graphics.fillOval(childX - 6, childY - 6, 12, 12);
+        }
+        graphics.setFill(Color.web("#2a1521", 0.92));
+        graphics.fillRoundRect(x + 10, y + height - 37, width - 20, 26, 7, 7);
+        lessonText(graphics, story.unstructuredOrphans() + " ORPHAN TASKS STILL RUNNING",
+                x + 19, y + height - 20, story.unstructuredOrphans() > 0 ? RED : Color.web("#8ea2b8"), 8, true);
+    }
+
+    private void drawStructuredScopePanel(GraphicsContext graphics, Sim.StructuredStory story,
+            double x, double y, double width, double height) {
+        double pulse = 0.55 + 0.35 * (0.5 + 0.5 * Math.sin(displayTime() * 3.2));
+        graphics.setFill(Color.web("#0a1b1a", 0.90));
+        graphics.fillRoundRect(x, y, width, height, 14, 14);
+        graphics.setStroke(GREEN.deriveColor(0, 1, 1, pulse));
+        graphics.setLineWidth(story.stage() == Sim.StructuredStage.CLOSE
+                || story.stage() == Sim.StructuredStage.SUMMARY ? 2.4 : 1.5);
+        graphics.strokeRoundRect(x + 0.5, y + 0.5, width - 1, height - 1, 14, 14);
+        lessonText(graphics, "PARENT TASK SCOPE", x + 12, y + 20, GREEN, 9, true);
+        lessonText(graphics, story.parentCancelled() ? "CANCEL REQUEST PROPAGATED ↓" : "JOIN OWNS CHILD LIFETIMES",
+                x + 365, y + 20, story.parentCancelled() ? AMBER : Color.web("#8ea2b8"), 8, true);
+
         List<Sim.ScopeStats> scopes = displayStructuredScopes();
         for (int scopeIndex = 0; scopeIndex < scopes.size(); scopeIndex++) {
             Sim.ScopeStats scope = scopes.get(scopeIndex);
-            double left = 18 + scopeIndex * 220;
+            double left = x + 10 + scopeIndex * 195;
+            double top = y + 31;
             Color scopeColor = scope.failed() > 0 ? RED : scope.joined() ? GREEN : BLUE;
-            graphics.setStroke(Color.web("#26364a"));
-            graphics.strokeRoundRect(left, 37, 202, 113, 12, 12);
-            graphics.setFill(Color.web("#0d1826"));
-            graphics.fillRoundRect(left + 1, 38, 200, 111, 12, 12);
+            graphics.setFill(Color.web("#0d1826", 0.94));
+            graphics.fillRoundRect(left, top, 184, 111, 10, 10);
             graphics.setStroke(scopeColor);
-            graphics.strokeLine(left + 101, 69, left + 101, 89);
-            graphics.strokeLine(left + 42, 89, left + 160, 89);
-            lessonText(graphics, scope.name() + " SCOPE", left + 12, 58, scopeColor, 10, true);
+            graphics.setLineWidth(scope.failed() > 0 && story.stage() == Sim.StructuredStage.CANCEL ? 2.5 : 1.1);
+            graphics.strokeRoundRect(left + 0.5, top + 0.5, 183, 110, 10, 10);
+            graphics.strokeLine(left + 92, top + 30, left + 92, top + 50);
+            graphics.strokeLine(left + 34, top + 50, left + 151, top + 50);
+            lessonText(graphics, scope.name(), left + 10, top + 20, scopeColor, 9, true);
+            lessonText(graphics, scope.joined() ? "JOINED" : scope.active() + " ACTIVE",
+                    left + 122, top + 20, Color.web("#8ea2b8"), 7, true);
             for (int child = 0; child < scope.total(); child++) {
-                double x = left + 42 + child * 39;
-                graphics.strokeLine(x, 89, x, 99);
+                double childX = left + 34 + child * 39;
+                graphics.strokeLine(childX, top + 50, childX, top + 61);
                 graphics.setFill(scopeChildColor(scope, child));
-                graphics.fillOval(x - 7, 98, 14, 14);
+                graphics.fillOval(childX - 7, top + 60, 14, 14);
+                lessonText(graphics, "CTX", childX - 9, top + 86,
+                        story.contextReleased() ? Color.web("#415064") : PURPLE, 6, true);
             }
             String state = scope.joined()
-                    ? scope.failed() > 0 ? "JOINED · FAILURE CONTAINED" : "JOINED · SUCCESS"
-                    : "WAITING FOR " + scope.active() + " CHILD" + (scope.active() == 1 ? "" : "REN");
-            lessonText(graphics, state, left + 12, 136, scopeColor, 8, true);
+                    ? scope.failed() > 0 ? "FAILURE PROPAGATED" : scope.cancelled() > 0 ? "LOSERS CANCELLED" : "SUCCESS"
+                    : "AWAITING CHILDREN";
+            lessonText(graphics, state, left + 9, top + 102, scopeColor, 7, true);
+
+            if (scope.failed() > 0 && story.stage() == Sim.StructuredStage.CANCEL) {
+                double wave = (displayTime() * 85) % 42;
+                graphics.setStroke(AMBER.deriveColor(0, 1, 1, Math.max(0.12, 1 - wave / 48)));
+                graphics.strokeOval(left + 92 - wave, top + 67 - wave, wave * 2, wave * 2);
+            }
         }
-        lessonCanvas.setAccessibleText("Structured concurrency with three scopes. " + scopes.stream()
-                .map(scope -> scope.name() + ": " + scope.succeeded() + " succeeded, " + scope.failed()
-                        + " failed, " + scope.cancelled() + " cancelled")
-                .reduce((left, right) -> left + "; " + right).orElse("starting"));
+    }
+
+    private void drawStructuredTimeline(GraphicsContext graphics, Sim.StructuredStory story,
+            double x, double y, double width) {
+        String[] stages = {"FORK", "RUN", "FAIL", "CANCEL", "JOIN", "CLOSE"};
+        int active = switch (story.stage()) {
+            case INACTIVE, FORK -> 0;
+            case RUN -> 1;
+            case FAIL -> 2;
+            case CANCEL -> 3;
+            case JOIN -> 4;
+            case CLOSE, SUMMARY -> 5;
+        };
+        double step = width / (stages.length - 1);
+        graphics.setStroke(Color.web("#35485f"));
+        graphics.setLineWidth(2);
+        graphics.strokeLine(x, y + 12, x + width, y + 12);
+        for (int index = 0; index < stages.length; index++) {
+            double pointX = x + index * step;
+            Color color = index < active ? GREEN : index == active
+                    ? stageColor(story.stage()) : Color.web("#42536a");
+            graphics.setFill(color);
+            double radius = index == active ? 7 + 1.5 * Math.sin(displayTime() * 6) : 5;
+            graphics.fillOval(pointX - radius, y + 12 - radius, radius * 2, radius * 2);
+            graphics.setTextAlign(index == 0 ? TextAlignment.LEFT
+                    : index == stages.length - 1 ? TextAlignment.RIGHT : TextAlignment.CENTER);
+            graphics.setFill(color);
+            graphics.setFont(Font.font("IBM Plex Mono", javafx.scene.text.FontWeight.SEMI_BOLD, 8));
+            graphics.fillText(stages[index], pointX, y + 34);
+        }
+        graphics.setTextAlign(TextAlignment.LEFT);
+    }
+
+    private void drawStructuredSummary(GraphicsContext graphics, Sim.StructuredStory story,
+            double x, double y, double width, double height) {
+        boolean held = story.stage() == Sim.StructuredStage.SUMMARY;
+        graphics.setFill(Color.web(held ? "#0b261f" : "#0d1724", held ? 0.98 : 0.82));
+        graphics.fillRoundRect(x, y, width, height, 10, 10);
+        graphics.setStroke(held ? GREEN : Color.web("#30445d"));
+        graphics.strokeRoundRect(x + 0.5, y + 0.5, width - 1, height - 1, 10, 10);
+        lessonText(graphics, held ? "PARENT FINISHED" : "PARENT AWAITS ITS CHILDREN",
+                x + 13, y + 18, held ? GREEN : WHITE, 9, true);
+        lessonText(graphics, story.structuredOrphans() + " ORPHANED TASKS", x + 13, y + 34,
+                story.structuredOrphans() == 0 ? GREEN : RED, 8, true);
+        lessonText(graphics, story.failureObserved() ? "FAILURE PROPAGATED" : "RESULTS COLLECTED",
+                x + 225, y + 27, story.failureObserved() ? RED : BLUE, 8, true);
+        lessonText(graphics, story.contextReleased() ? "CONTEXT RELEASED" : "CONTEXT OWNED BY SCOPE",
+                x + 445, y + 27, story.contextReleased() ? PURPLE : Color.web("#8ea2b8"), 8, true);
+        lessonText(graphics, "NO CHILD OUTLIVES PARENT", x + 651, y + 27,
+                held ? GREEN : Color.web("#8ea2b8"), 8, true);
+    }
+
+    private static void contextBadge(GraphicsContext graphics, String text, double x, double y, Color color) {
+        double width = Math.max(72, text.length() * 6.1 + 14);
+        graphics.setFill(color.deriveColor(0, 0.6, 0.5, 0.25));
+        graphics.fillRoundRect(x, y, width, 17, 8, 8);
+        lessonText(graphics, text, x + 7, y + 12, color, 7, true);
+    }
+
+    private static Color stageColor(Sim.StructuredStage stage) {
+        return switch (stage) {
+            case FAIL -> RED;
+            case CANCEL -> AMBER;
+            case JOIN, CLOSE, SUMMARY -> GREEN;
+            default -> BLUE;
+        };
     }
 
     private static Color scopeChildColor(Sim.ScopeStats scope, int child) {
@@ -2145,6 +2304,9 @@ public final class MachineScene extends StackPane {
     }
     private List<Sim.ScopeStats> displayStructuredScopes() {
         return replayFrame == null ? sim.structuredScopes() : replayFrame.structuredScopes();
+    }
+    private Sim.StructuredStory displayStructuredStory() {
+        return replayFrame == null ? sim.structuredStory() : replayFrame.structuredStory();
     }
     private List<? extends ThreadView> displayVts() {
         return replayFrame == null ? sim.vts() : replayFrame.vts();
