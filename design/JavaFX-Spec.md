@@ -100,8 +100,8 @@ toQueue ──→ queued ──→ mounting ──→ running ──┬──→
 |---|---|
 | Header | Pulsing green LED (1.6 s), title, GUIDED/FREE RUN toggle (ToggleGroup), status text BOOTING/RUNNING/PAUSED |
 | Right sidebar 290px | Counters include RUNNABLE, MOUNTED, PARKED, COMPLETED, live total, and utilization · task-profile mix · throughput graph · 4 behavior cards · event log, 7 clickable mono lines |
-| Narration card | Bottom-left 400px overlay: CHAPTER n/10, colored title, body text, ←/Next buttons. Chapter copy: §10 verbatim |
-| Bottom bar | Pause/Run · +25 tasks · Force park · JDK 21 · JDK 25 · Showdown · replay scrubber with marker rail and LIVE return · speed Slider + readout "0.75×" |
+| Narration card | Bottom-left 400px operator overlay: CHAPTER n/10, colored title, body text, ←/Next buttons. Presenter mode expands it and substitutes one audience takeaway for the full §10 copy. |
+| Bottom bar | Pause/Run · chapter-relevant action group · Settings · About · Present · replay scrubber with marker rail and LIVE return · speed Slider + readout "0.75×" |
 | Keyboard | SPACE live/replay play-pause · J/K history step · L return live · C cinematic spotlight · M sound mute · ←/→ chapters (or slider step while focused) · 1–4 camera presets · mouse drag orbit (Δθ=−0.005/px, φ clamp 0.15–1.45) · scroll zoom (dist 80–480) |
 | Hover / follow | PickResult on the VT pool → tooltip; click a VT or log line to pin a lifecycle card showing RUNNABLE / MOUNTED / PARKED / TERMINATED durations |
 
@@ -392,6 +392,7 @@ Acceptance — matches the HTML reference sim when:
 - [ ] Pool limit: at most three DB permits are active; extra VTs remain parked and carriers continue draining work
 - [ ] CPU bound: all carriers stay busy, no tasks park, and the queue grows beyond the carrier count
 - [ ] Structured: three four-child scope trees render inside an animated parent boundary; the lifecycle timeline, inherited context, failure/cancellation propagation, join-policy comparison, unstructured orphan contrast, held closing summary, chapter-only controls, and replay state all remain deterministic
+- [ ] Presenter: projected chapter diagrams and labels remain readable at 2560×1440, narration is a single takeaway, highlighted VTs are not cropped, operator diagnostics are absent, and the consequence meter cannot overlap narration on narrow displays
 - [ ] Replay: scrubbing pauses the live model and updates 3D/HUD/log/notes from immutable frames; playing advances recorded frames; LIVE restores the untouched live state and previous running/auto-play flags
 - [ ] Hero: exactly one trail at a time; new hero auto-picked after previous completes
 - [ ] Input: SPACE, ←/→, 1–4, drag orbit (φ clamped 0.15–1.45), scroll zoom (80–480), hover tooltip on any sphere
@@ -455,9 +456,10 @@ Global: window bg `#070b12`; UI font Space Grotesk; data font IBM Plex Mono; all
 | Key-behavior cards (×4, gap 7) | padding 8 11; title 14px/500 in the behavior color; body 12px #8ea2b8. Flash: full-card overlay, colors rgba(96,165,250,.16) / rgba(167,139,250,.16) / rgba(52,211,153,.16) / rgba(248,113,113,.18); opacity = max(0, 1−age/1.6), 0.35 s ease |
 | Event log | header 11px letter-spacing .16em #7d8fa3 "EVENT LOG"; lines mono 10.5px lh 1.75 #9db2c8, ellipsis-truncated, newest first, max 9 |
 | Narration card | 400px wide, bottom-left inset 16; bg rgba(10,16,25,.88), border #1d2b3c, radius 12, padding 14 16, blur backdrop if cheap. Row: "CHAPTER n/10" mono 12px #7d8fa3 · title 17px/700 in chapter color · spacer · ← button 30×26 (bg #0e1826, border #26364a, fg #9db2c8) · "Next →" button h26 padding 0 12 (bg #0f2b21, border #2a5c48, fg #6ee7b7). Body 14px lh 1.55 #b6c6d8 |
+| Presenter mode | Full-screen stage view entered by `P` or `Present`; hide operator chrome and diagnostics, replace paragraph narration with one audience-facing takeaway, enlarge world labels and fixed teaching canvases according to viewport width, scale the consequence meter on wide displays, hide it below 1320px, and add 12% camera distance so spotlight subjects remain in frame. `Esc` exits. |
 | Camera preset buttons | top-right inset 16/14, gap 6; mono 10px, padding 5 10, radius 6, bg rgba(14,24,38,.8), border #26364a, fg #9db2c8; labels OVERVIEW CARRIERS HEAP TOP |
 | Shortcut hint | bottom-right inset 16; mono 10px #5c7089; include presenter, quality, contrast, notes, and camera shortcuts. Drag orbits; scrolling and pinch gestures zoom. |
-| Bottom bar | padding 10 22, top border. Pause/Run: 13px/500, padding 8 18, radius 8, width 90, green set. Task/park/pin/settings controls retain their chapter colors. Center: replay status, event legend, history slider + marker rail, LIVE button. Right: FPS, SPEED slider w130 range 0.25–3, and readout "0.75×". |
+| Bottom bar | padding 10 22, top border. Pause/Run: 13px/500, padding 8 18, radius 8, width 90, green set. Actions are contextual: task/park in lifecycle chapters, JDK controls in Chapter 5, structured controls in Chapter 10, and no workload controls in fixed advanced scenarios. Settings, About, and Present remain. Center: replay status, event legend, history slider + marker rail, LIVE button. Right: FPS, SPEED slider w130 range 0.25–3, and readout "0.75×". |
 | Hover tooltip | bg rgba(10,16,25,.92), border #2a3b52, radius 6, padding 5 9, mono 12px #cfe0f2, no wrap, offset cursor +14/+10 |
 
 ## 14 · Event Catalog + Tooltip Grammar (exhaustive)

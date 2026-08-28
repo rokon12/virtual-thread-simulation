@@ -100,7 +100,15 @@ public final class App extends Application {
         observedChapter = sim.chapter();
         machine.cameraForChapter(observedChapter);
         startLoop();
-        if (settings.presenter) setPresenterMode(true);
+        if (settings.presenter) {
+            // Native full-screen transitions can block headless screenshot automation.
+            // Use the same large presentation viewport without entering a macOS Space.
+            if (settings.snapshotPath != null) {
+                stage.setWidth(2560);
+                stage.setHeight(1440);
+            }
+            setPresenterMode(true);
+        }
 
         Platform.runLater(() -> {
             String pipeline = System.getProperty("prism.order", "auto");
@@ -133,7 +141,8 @@ public final class App extends Application {
                 this::startJdkShowdown,
                 this::cycleStructuredPolicy, this::injectStructuredFailure,
                 this::cancelStructuredParent, this::restartStructuredStory,
-                this::showSettings, this::showAbout, machine::highlightVt, this::showReplayFrame,
+                this::showSettings, this::showAbout, () -> setPresenterMode(true),
+                machine::highlightVt, this::showReplayFrame,
                 this::returnLive, machine::requestFocus);
         hud = new Hud(sim, replayTimeline, actions);
         StackPane machineAndNarration = new StackPane(machine, hud.narration());
@@ -447,7 +456,7 @@ public final class App extends Application {
         presenterMode = enabled;
         hud.setPresenterMode(enabled);
         machine.setPresenterMode(enabled);
-        stage.setFullScreen(enabled);
+        stage.setFullScreen(enabled && settings.snapshotPath == null);
         machine.requestFocus();
     }
 

@@ -39,7 +39,8 @@ expose ordinary virtual-thread carrier identity.
 - `←` / `→`: previous or next chapter
 - `1`–`4`: overview, carriers, heap, and top camera presets
 - `0`: emergency overview camera
-- `P`: presenter mode (full screen with distraction-free HUD)
+- `P` or the `Present` button: presenter mode (full screen with a focused,
+  projector-scaled HUD); `Esc` returns to the operator view
 - `A`: auto-advance chapters every 11 seconds
 - `R`: replay the current chapter
 - `Q`: cycle automatic, high, and low render quality
@@ -58,9 +59,16 @@ expose ordinary virtual-thread carrier identity.
 - Click a VT or one of its event-log entries: follow its lifecycle and time in
   each state
 - `Esc` or the lifecycle card's × button: stop following a VT
-- HUD controls: switch synthetic/live feeds, add 25 tasks, force a park, compare
-  the same `synchronized` blocking operation on JDK 21 and JDK 25, change speed,
-  restart with new demo settings, or open the About dialog
+- HUD controls are chapter-aware: lifecycle actions appear only for mount/park/
+  resume, JDK actions only for the version comparison, and structured-scope
+  actions only for Chapter 10. Settings, About, and Present remain available.
+
+Presenter mode replaces paragraph narration with one audience-facing takeaway,
+enlarges fixed teaching diagrams and machine labels for a projector, adds safer
+camera breathing room, and removes operator diagnostics. The consequence meter
+also scales for wide displays and gets out of the way on narrow screens. Keep
+the full narration and event log in the operator view or the second-screen
+speaker notes.
 
 `Showdown` runs both JDK behaviors simultaneously with the same eight-task
 queue. The JDK 21 lane retains a red pinned carrier while the JDK 25 lane parks

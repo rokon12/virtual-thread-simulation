@@ -186,6 +186,7 @@ public final class MachineScene extends StackPane {
     private Quality requestedQuality = Quality.AUTO;
     private boolean autoLow;
     private boolean highContrast;
+    private boolean presenterMode;
     private double lastGearDisplayTime = Double.NaN;
     private boolean cinematicEnabled = true;
     private SpotlightType spotlightType;
@@ -294,6 +295,7 @@ public final class MachineScene extends StackPane {
         StackPane.setMargin(shortcut, new Insets(0, 16, 106, 0));
 
         installPointerControls();
+        widthProperty().addListener((observable, oldValue, newValue) -> updatePresentationScale());
     }
 
     private VBox buildFollowOverlay() {
@@ -1395,11 +1397,12 @@ public final class MachineScene extends StackPane {
         GraphicsContext graphics = spotlightCanvas.getGraphicsContext2D();
         double width = spotlightCanvas.getWidth();
         double height = spotlightCanvas.getHeight();
+        double presentationScale = presenterMode ? clamp(width / 1900.0, 1.05, 1.35) : 1;
         graphics.clearRect(0, 0, width, height);
         double fadeIn = clamp(spotlightElapsed / 0.18, 0, 1);
         double fadeOut = clamp((1.85 - spotlightElapsed) / 0.35, 0, 1);
         double alpha = Math.min(fadeIn, fadeOut);
-        double radius = 76 + Math.sin(spotlightElapsed * 7) * 5;
+        double radius = (76 + Math.sin(spotlightElapsed * 7) * 5) * presentationScale;
         double fadeRadius = Math.max(width, height);
         graphics.setFill(new RadialGradient(0, 0, centerX, centerY, fadeRadius, false,
                 CycleMethod.NO_CYCLE,
@@ -1416,19 +1419,21 @@ public final class MachineScene extends StackPane {
         graphics.strokeOval(centerX - radius - 7, centerY - radius - 7,
                 radius * 2 + 14, radius * 2 + 14);
 
-        double calloutWidth = 322;
+        double calloutWidth = 322 * presentationScale;
         double calloutX = clamp(centerX - calloutWidth / 2, 12, Math.max(12, width - calloutWidth - 12));
-        double calloutY = centerY - radius - 55;
+        double calloutY = centerY - radius - 55 * presentationScale;
         if (calloutY < 12) calloutY = centerY + radius + 16;
         graphics.setFill(Color.web("#08111d", 0.96 * alpha));
-        graphics.fillRoundRect(calloutX, calloutY, calloutWidth, 38, 11, 11);
+        graphics.fillRoundRect(calloutX, calloutY, calloutWidth, 38 * presentationScale, 11, 11);
         graphics.setStroke(spotlightType.color.deriveColor(0, 1, 1, alpha));
         graphics.setLineWidth(1.5);
-        graphics.strokeRoundRect(calloutX + 0.5, calloutY + 0.5, calloutWidth - 1, 37, 11, 11);
+        graphics.strokeRoundRect(calloutX + 0.5, calloutY + 0.5, calloutWidth - 1,
+                38 * presentationScale - 1, 11, 11);
         graphics.setFill(spotlightType.color.deriveColor(0, 1, 1, alpha));
         graphics.setTextAlign(TextAlignment.CENTER);
-        graphics.setFont(Font.font("IBM Plex Mono", 12));
-        graphics.fillText(spotlightType.callout, calloutX + calloutWidth / 2, calloutY + 24);
+        graphics.setFont(Font.font("IBM Plex Mono", 12 * presentationScale));
+        graphics.fillText(spotlightType.callout, calloutX + calloutWidth / 2,
+                calloutY + 24 * presentationScale);
         spotlightCanvas.setAccessibleText(spotlightType.callout + ". Cinematic slow motion active.");
         spotlightCanvas.setVisible(true);
     }
@@ -1531,7 +1536,8 @@ public final class MachineScene extends StackPane {
     }
 
     private void drawConsequenceMeter() {
-        boolean visible = displayBootT() >= 3 && !displayJdkShowdown().active();
+        boolean visible = displayBootT() >= 3 && !displayJdkShowdown().active()
+                && (!presenterMode || getWidth() >= 1320);
         consequenceCanvas.setVisible(visible);
         if (!visible) return;
         Sim.ConsequenceStats stats = displayConsequenceStats();
@@ -2248,12 +2254,44 @@ public final class MachineScene extends StackPane {
     }
 
     public void setPresenterMode(boolean presenter) {
+        presenterMode = presenter;
         cameraButtons.setVisible(!presenter);
         cameraButtons.setManaged(!presenter);
         presentationButtons.setVisible(!presenter);
         presentationButtons.setManaged(!presenter);
         shortcut.setVisible(!presenter);
         shortcut.setManaged(!presenter);
+        diagnostics.setVisible(!presenter);
+        diagnostics.setManaged(!presenter);
+        camera.setPresentationFraming(presenter);
+        getStyleClass().remove("presenter-machine");
+        if (presenter) getStyleClass().add("presenter-machine");
+        updatePresentationScale();
+    }
+
+    private void updatePresentationScale() {
+        double overlayScale = presenterMode
+                ? clamp(Math.max(1440, getWidth()) / 1650.0, 1.12, 1.55) : 1;
+        setTopOverlayScale(lessonCanvas, overlayScale);
+        setTopOverlayScale(structuredCanvas, overlayScale);
+        setTopOverlayScale(jdkShowdownCanvas, overlayScale);
+
+        double meterScale = presenterMode ? Math.min(1.38, overlayScale) : 1;
+        consequenceCanvas.setScaleX(meterScale);
+        consequenceCanvas.setScaleY(meterScale);
+        consequenceCanvas.setTranslateX(-(meterScale - 1) * consequenceCanvas.getWidth() / 2);
+        consequenceCanvas.setTranslateY(-(meterScale - 1) * consequenceCanvas.getHeight() / 2);
+
+        double comparisonScale = presenterMode ? Math.min(1.32, overlayScale) : 1;
+        comparisonOverlay.setScaleX(comparisonScale);
+        comparisonOverlay.setScaleY(comparisonScale);
+        comparisonOverlay.setTranslateY(presenterMode ? (comparisonScale - 1) * 40 : 0);
+    }
+
+    private static void setTopOverlayScale(Canvas canvas, double scale) {
+        canvas.setScaleX(scale);
+        canvas.setScaleY(scale);
+        canvas.setTranslateY((scale - 1) * canvas.getHeight() / 2);
     }
 
     public void setHighContrast(boolean enabled) {

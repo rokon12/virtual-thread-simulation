@@ -54,13 +54,26 @@ public final class Hud {
         "Virtual threads improve blocking concurrency, not CPU parallelism. Compute-only tasks saturate every carrier and the run queue grows, but throughput plateaus at the available carrier/core count.",
         "Structured concurrency makes task lifetime a tree: no child outlives its parent. Follow fork, failure, cancellation, join, close, and inherited-context release; then use the chapter controls to compare join policies, inject a failure, cancel the parent, or replay the deterministic story."
     };
+    private static final String[] CHAPTER_TAKEAWAYS = {
+        "Four OS threads. Four carriers. This small machine is all the OS sees.",
+        "A virtual thread uses an OS thread only while it is mounted.",
+        "Blocking parks the virtual thread and immediately releases its carrier.",
+        "A continuation can resume on any available carrier—not necessarily the one it left.",
+        "Same synchronized wait: JDK 21 pins; JDK 25 releases the carrier.",
+        "500 virtual threads. Four carriers. Blocking concurrency scales without 500 OS threads.",
+        "Blocked platform threads hold OS threads; parked virtual threads do not.",
+        "Virtual threads remove the thread bottleneck—not downstream resource limits.",
+        "Virtual threads scale blocking concurrency, not CPU parallelism.",
+        "No child outlives its parent: failure, cancellation, join, and context stay inside the scope."
+    };
 
     public record Actions(Runnable playPause, IntConsumer chapter, Consumer<Boolean> freeRun,
             Consumer<Boolean> liveMode, Runnable burst, Runnable park,
             Runnable jdk21Block, Runnable jdk25Block, Runnable jdkShowdown,
             Runnable structuredPolicy, Runnable structuredFailure,
             Runnable structuredCancel, Runnable structuredReplay,
-            Runnable settings, Runnable about, LongConsumer highlight, IntConsumer replayFrame,
+            Runnable settings, Runnable about, Runnable presenter,
+            LongConsumer highlight, IntConsumer replayFrame,
             Runnable returnLive, Runnable refocus) {}
 
     private final Sim sim;
@@ -111,6 +124,8 @@ public final class Hud {
     private int lastTimelineSize = -1;
     private int lastTimelineIndex = -1;
     private VBox timelineControl;
+    private boolean compact;
+    private boolean presenterMode;
 
     public Hud(Sim sim, ReplayTimeline timeline, Actions actions) {
         this.sim = sim;
@@ -304,6 +319,8 @@ public final class Hud {
                 "Change carrier count, task limit, task rate, and random seed");
         Button about = controlButton("About", "about-button", actions.about,
                 "Learn who built the simulator and why it exists");
+        Button present = controlButton("Present", "present-button", actions.presenter,
+                "Enter the clean full-screen presentation view; press Escape to exit");
         VBox timelineControl = buildTimelineControl();
         HBox.setHgrow(timelineControl, Priority.ALWAYS);
         performance.getStyleClass().add("performance-label");
@@ -324,7 +341,7 @@ public final class Hud {
         speedReadout.setMinWidth(44);
         bar.getChildren().addAll(playButton, burstButton, parkButton, jdk21Button, jdk25Button, jdkShowdownButton,
                 structuredControls,
-                settings, about, timelineControl,
+                settings, about, present, timelineControl,
                 performance, speedLabel, speedSlider, speedReadout);
         return bar;
     }
@@ -512,12 +529,14 @@ public final class Hud {
                 + " · I/O " + mix.ioBound());
         int chapter = replayFrame == null ? sim.chapter() : replayFrame.chapter();
         boolean structuredChapter = chapter == 9;
+        boolean lifecycleTools = chapter >= 1 && chapter <= 3;
+        boolean jdkTools = chapter == 4;
         setShown(structuredControls, structuredChapter);
-        setShown(burstButton, !structuredChapter);
-        setShown(parkButton, !structuredChapter);
-        setShown(jdk21Button, !structuredChapter);
-        setShown(jdk25Button, !structuredChapter);
-        setShown(jdkShowdownButton, !structuredChapter);
+        setShown(burstButton, lifecycleTools && !structuredChapter);
+        setShown(parkButton, lifecycleTools && !structuredChapter);
+        setShown(jdk21Button, jdkTools);
+        setShown(jdk25Button, jdkTools);
+        setShown(jdkShowdownButton, jdkTools);
         Sim.StructuredStory structuredStory = replayFrame == null
                 ? sim.structuredStory() : replayFrame.structuredStory();
         structuredPolicyButton.setText("Policy: " + structuredStory.policy().shortDisplay());
@@ -526,8 +545,9 @@ public final class Hud {
         chapterTitle.setText(chapterTitle(chapter));
         chapterTitle.getStyleClass().removeIf(style -> style.startsWith("text-"));
         chapterTitle.getStyleClass().add("text-" + CHAPTER_COLORS[chapter]);
-        chapterBody.setText(chapterText(chapter));
-        narration.setAccessibleText(chapterTitle(chapter) + ". " + chapterText(chapter));
+        String body = presenterMode ? chapterTakeaway(chapter) : chapterText(chapter);
+        chapterBody.setText(body);
+        narration.setAccessibleText(chapterTitle(chapter) + ". " + body);
         speedReadout.setText("%.2f×".formatted(sim.speed()));
     }
 
@@ -612,10 +632,9 @@ public final class Hud {
     }
 
     public void setCompact(boolean compact) {
+        this.compact = compact;
         setSidebarWidth(sidebar, compact ? 238 : 290);
-        narration.setPrefWidth(compact ? 340 : 400);
-        narration.setMaxWidth(compact ? 340 : 400);
-        chapterBody.setMaxWidth(compact ? 308 : 368);
+        applyNarrationSize();
         subtitle.setManaged(!compact);
         subtitle.setVisible(!compact);
         performance.setManaged(!compact);
@@ -637,11 +656,21 @@ public final class Hud {
     }
 
     public void setPresenterMode(boolean presenter) {
+        presenterMode = presenter;
         setShown(header, !presenter);
         setShown(sidebar, !presenter);
         setShown(bottomBar, !presenter);
         narration.getStyleClass().remove("presenter-narration");
         if (presenter) narration.getStyleClass().add("presenter-narration");
+        applyNarrationSize();
+        sync();
+    }
+
+    private void applyNarrationSize() {
+        double width = presenterMode ? (compact ? 470 : 610) : (compact ? 340 : 400);
+        narration.setPrefWidth(width);
+        narration.setMaxWidth(width);
+        chapterBody.setMaxWidth(width - 32);
     }
 
     private static void setShown(Node node, boolean shown) {
@@ -655,6 +684,10 @@ public final class Hud {
 
     public static String chapterText(int chapter) {
         return CHAPTER_TEXT[Math.floorMod(chapter, CHAPTER_TEXT.length)];
+    }
+
+    public static String chapterTakeaway(int chapter) {
+        return CHAPTER_TAKEAWAYS[Math.floorMod(chapter, CHAPTER_TAKEAWAYS.length)];
     }
 
     public Node header() { return header; }

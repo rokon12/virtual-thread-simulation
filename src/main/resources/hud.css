@@ -157,10 +157,33 @@
 }
 
 .presenter-narration {
-    -fx-background-color: rgba(0,0,0,0.86);
-    -fx-border-color: #4b627c;
-    -fx-scale-x: 1.08;
-    -fx-scale-y: 1.08;
+    -fx-padding: 18 20 18 20;
+    -fx-background-color: rgba(4,9,15,0.94);
+    -fx-border-color: rgba(96,165,250,0.72);
+    -fx-border-width: 1.5;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.72), 30, 0.22, 0, 9);
+}
+
+.presenter-narration .chapter-number {
+    -fx-font-size: 13px;
+}
+
+.presenter-narration .chapter-title {
+    -fx-font-size: 22px;
+}
+
+.presenter-narration .chapter-body {
+    -fx-font-size: 19px;
+    -fx-font-weight: 500;
+    -fx-text-fill: #d6e5f4;
+    -fx-line-spacing: 5px;
+}
+
+.presenter-narration .previous-button,
+.presenter-narration .next-button {
+    -fx-min-height: 32;
+    -fx-pref-height: 32;
+    -fx-font-size: 14px;
 }
 
 .chapter-number {
@@ -338,10 +361,24 @@
     -fx-text-fill: #6ee7b7;
 }
 
-.settings-button, .about-button {
+.settings-button, .about-button, .present-button {
     -fx-background-color: #171c24;
     -fx-border-color: #344153;
     -fx-text-fill: #b6c6d8;
+}
+
+.present-button {
+    -fx-background-color: #102a23;
+    -fx-border-color: #2a5c48;
+    -fx-text-fill: #6ee7b7;
+}
+
+.presenter-machine .world-label {
+    -fx-font-size: 15px;
+}
+
+.presenter-machine .parked-badge {
+    -fx-font-size: 11px;
 }
 
 .dialog-pane {

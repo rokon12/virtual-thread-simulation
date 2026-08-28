@@ -15,6 +15,7 @@ public final class CameraRig {
     private double phi = 1.12;
     private double distance = 260;
     private double targetY = 45;
+    private double presentationScale = 1;
     private Orbit goal;
     private double pointerX;
     private double pointerY;
@@ -32,17 +33,31 @@ public final class CameraRig {
 
     public void toPreset(Preset preset) {
         goal = switch (preset) {
-            case OVERVIEW -> new Orbit(0.65, 1.12, 260, 45);
-            case CARRIERS -> new Orbit(0.35, 1.25, 150, 30);
-            case HEAP -> new Orbit(-0.55, 1.15, 170, 45);
-            case TOP -> new Orbit(0.65, 0.35, 300, 40);
+            case OVERVIEW -> new Orbit(0.65, 1.12, 260 * presentationScale, 45);
+            case CARRIERS -> new Orbit(0.35, 1.25, 150 * presentationScale, 30);
+            case HEAP -> new Orbit(-0.55, 1.15, 170 * presentationScale, 45);
+            case TOP -> new Orbit(0.65, 0.35, 300 * presentationScale, 40);
         };
     }
 
     public void toScaleFinale(double progress) {
         double amount = clamp(progress, 0, 1);
         goal = new Orbit(0.65 + amount * 0.12, 1.12 - amount * 0.22,
-                260 + amount * 105, 45 + amount * 3);
+                (260 + amount * 105) * presentationScale, 45 + amount * 3);
+    }
+
+    /** Adds breathing room around the machine when the operator chrome is hidden. */
+    public void setPresentationFraming(boolean presenter) {
+        double nextScale = presenter ? 1.12 : 1;
+        if (Math.abs(nextScale - presentationScale) < 0.001) return;
+        double ratio = nextScale / presentationScale;
+        distance = clamp(distance * ratio, 80, 480);
+        if (goal != null) {
+            goal = new Orbit(goal.theta, goal.phi,
+                    clamp(goal.distance * ratio, 80, 480), goal.targetY);
+        }
+        presentationScale = nextScale;
+        apply();
     }
 
     public void beginDrag(double x, double y) {
