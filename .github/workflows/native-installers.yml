@@ -80,5 +80,34 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "${assets[@]}" --generate-notes --title "$GITHUB_REF_NAME"
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --verify-tag \
+              --latest \
+              --generate-notes \
+              --title "Virtual Thread Machine $GITHUB_REF_NAME" \
+              --notes "Self-contained installers for macOS Apple silicon, Windows x64, and Debian/Ubuntu x64. No separate JDK is required."
           fi
+
+  publish-package:
+    name: Publish Maven package
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
+      - name: Publish to GitHub Packages
+        run: mvn --batch-mode --no-transfer-progress deploy -DskipTests
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

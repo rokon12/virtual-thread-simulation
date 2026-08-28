@@ -6,8 +6,9 @@
 
     <groupId>ca.bazlur</groupId>
     <artifactId>virtual-thread-simulation</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <name>Virtual Thread Machine</name>
+    <url>https://github.com/rokon12/virtual-thread-simulation</url>
 
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
@@ -18,7 +19,7 @@
         <app.menu.name>VT Machine</app.menu.name>
         <app.package.name>virtual-thread-machine</app.package.name>
         <app.identifier>ca.bazlur.virtualthreadmachine</app.identifier>
-        <app.version>1.0.0</app.version>
+        <app.version>${project.version}</app.version>
         <app.vendor>Bazlur Rahman</app.vendor>
         <app.description>An interactive JavaFX visualization of Java virtual threads.</app.description>
         <app.copyright>Copyright (c) 2026 Bazlur Rahman</app.copyright>
@@ -135,5 +136,13 @@
             </properties>
         </profile>
     </profiles>
+
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/rokon12/virtual-thread-simulation</url>
+        </repository>
+    </distributionManagement>
 
 </project>
