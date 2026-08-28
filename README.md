@@ -247,22 +247,6 @@ hardened runtime. After configuring an `xcrun notarytool` keychain profile, set
 `VT_MACHINE_NOTARY_PROFILE` and run `scripts/notarize-macos.sh` to submit,
 staple, and validate the `.dmg`.
 
-## Maven package
-
-Each tagged release also publishes the modular JAR to GitHub Packages:
-
-```xml
-<dependency>
-    <groupId>ca.bazlur</groupId>
-    <artifactId>virtual-thread-simulation</artifactId>
-    <version>1.0.0</version>
-</dependency>
-```
-
-GitHub Packages follows the private repository's access permissions and
-requires an authenticated Maven client with `read:packages`. Desktop users
-should use the self-contained installers from GitHub Releases instead.
-
 ## JDK 21/25 accuracy note
 
 JDK 21 pins a virtual thread when it blocks inside `synchronized`. Since JDK 24,
