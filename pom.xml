@@ -14,6 +14,15 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <javafx.version>25.0.1</javafx.version>
         <junit.version>5.11.4</junit.version>
+        <app.display.name>Virtual Thread Machine</app.display.name>
+        <app.menu.name>VT Machine</app.menu.name>
+        <app.package.name>virtual-thread-machine</app.package.name>
+        <app.identifier>ca.bazlur.virtualthreadmachine</app.identifier>
+        <app.version>1.0.0</app.version>
+        <app.vendor>Bazlur Rahman</app.vendor>
+        <app.description>An interactive JavaFX visualization of Java virtual threads.</app.description>
+        <app.copyright>Copyright (c) 2026 Bazlur Rahman</app.copyright>
+        <jpackage.platform.options></jpackage.platform.options>
     </properties>
 
     <dependencies>
@@ -91,18 +100,22 @@
                                 <goals><goal>run</goal></goals>
                                 <configuration>
                                     <target>
-                                        <delete dir="${project.build.directory}/dist/Virtual Thread Machine.app" quiet="true" />
-                                        <delete dir="${project.build.directory}/dist/Virtual Thread Machine" quiet="true" />
+                                        <delete dir="${project.build.directory}/dist/${app.display.name}.app" quiet="true" />
+                                        <delete dir="${project.build.directory}/dist/${app.display.name}" quiet="true" />
                                         <mkdir dir="${project.build.directory}/dist" />
                                         <exec executable="${java.home}/bin/jpackage" failonerror="true">
                                             <arg value="--type"/><arg value="app-image"/>
-                                            <arg value="--name"/><arg value="Virtual Thread Machine"/>
+                                            <arg value="--name"/><arg value="${app.display.name}"/>
                                             <arg value="--dest"/><arg value="${project.build.directory}/dist"/>
-                                            <arg value="--app-version"/><arg value="1.0.0"/>
+                                            <arg value="--app-version"/><arg value="${app.version}"/>
+                                            <arg value="--vendor"/><arg value="${app.vendor}"/>
+                                            <arg value="--description"/><arg value="${app.description}"/>
+                                            <arg value="--copyright"/><arg value="${app.copyright}"/>
                                             <arg value="--module-path"/>
                                             <arg value="${project.build.outputDirectory}${path.separator}${project.build.directory}/jpackage-modules"/>
                                             <arg value="--module"/><arg value="vtmachine/vtmachine.App"/>
                                             <arg value="--java-options"/><arg value="--enable-native-access=javafx.graphics"/>
+                                            <arg line="${jpackage.platform.options}"/>
                                         </exec>
                                     </target>
                                 </configuration>
@@ -111,6 +124,15 @@
                     </plugin>
                 </plugins>
             </build>
+        </profile>
+        <profile>
+            <id>jpackage-macos</id>
+            <activation>
+                <os><family>mac</family></os>
+            </activation>
+            <properties>
+                <jpackage.platform.options>--mac-package-identifier ${app.identifier} --mac-package-name "${app.menu.name}" --mac-app-category education</jpackage.platform.options>
+            </properties>
         </profile>
     </profiles>
 

@@ -193,20 +193,34 @@ The suite also exercises randomized state invariants, immutable bounded replay
 history and markers, deterministic event vocabulary, the real virtual-thread
 bridge, settings parsing, and a scale performance budget.
 
-## Native package
+## Native installers
 
-Build a self-contained platform app image with JDK 25's `jpackage`:
+JDK 25's `jpackage` creates a self-contained installer with its own Java
+runtime. Build on the target operating system:
 
-```bash
-scripts/package.sh
-# or: mvn clean package -Pnative-image
-```
+| Platform | Command | Installer |
+| --- | --- | --- |
+| macOS | `scripts/package.sh` | `.dmg` |
+| Windows | `pwsh -File scripts/package.ps1` | `.msi` |
+| Debian/Ubuntu Linux | `scripts/package.sh` | `.deb` |
 
-The result is under `target/dist`. On macOS, set
-`VT_MACHINE_SIGN_IDENTITY` before packaging to codesign with the hardened
-runtime. After configuring an `xcrun notarytool` keychain profile, set
+Results are written under `target/dist` with predictable names such as
+`Virtual-Thread-Machine-1.0.0-macos-arm64.dmg`. Override the version with
+`VT_MACHINE_VERSION=1.1.0`. Use `mvn clean package -Pnative-image` when you
+only need the unpackaged application image.
+
+The display name remains **Virtual Thread Machine**, while each platform uses
+an installer-safe identity: `ca.bazlur.virtualthreadmachine` on macOS,
+`virtual-thread-machine` on Linux, and a stable upgrade UUID on Windows.
+
+The **Native installers** GitHub Actions workflow builds all three packages on
+their native runners. Run it manually to download workflow artifacts, or push a
+tag such as `v1.0.0` to create a GitHub release with the installers attached.
+
+On macOS, set `VT_MACHINE_SIGN_IDENTITY` before packaging to codesign with the
+hardened runtime. After configuring an `xcrun notarytool` keychain profile, set
 `VT_MACHINE_NOTARY_PROFILE` and run `scripts/notarize-macos.sh` to submit,
-staple, and validate the bundle.
+staple, and validate the `.dmg`.
 
 ## JDK 21/25 accuracy note
 
