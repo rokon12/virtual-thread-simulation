@@ -5,6 +5,8 @@ park, resume, and pin across a small carrier pool. The implementation follows
 [`design/JavaFX-Spec.md`](design/JavaFX-Spec.md) and uses the accompanying HTML
 simulation as its behavioral reference.
 
+[![Native installers](https://github.com/rokon12/virtual-thread-simulation/actions/workflows/native-installers.yml/badge.svg)](https://github.com/rokon12/virtual-thread-simulation/actions/workflows/native-installers.yml)
+
 ![The Virtual Thread Machine demonstrating parking, downstream limits, structured scopes, and historical timeline replay](docs/media/virtual-thread-machine-demo.gif)
 
 ## About
@@ -15,7 +17,27 @@ to see and explain. It visualizes mounting, parking, resuming, pinning, carrier
 scheduling, external I/O, downstream limits, and structured concurrency. It is
 a teaching simulation rather than a production JVM profiler.
 
-## Run
+## Install
+
+Packaged releases include a Java runtime, so installing the application does
+not require a separate JDK or Maven installation. Download the package for your
+platform from [GitHub Releases](https://github.com/rokon12/virtual-thread-simulation/releases):
+
+| Platform | Package | Installation |
+| --- | --- | --- |
+| macOS Apple silicon | `Virtual-Thread-Machine-<version>-macos-arm64.dmg` | Open the DMG and drag **Virtual Thread Machine** into Applications. |
+| Windows x64 | `Virtual-Thread-Machine-<version>-windows-x64.msi` | Run the MSI and use the Start Menu or desktop shortcut. |
+| Debian/Ubuntu x64 | `Virtual-Thread-Machine-<version>-linux-x64.deb` | Run `sudo apt install ./Virtual-Thread-Machine-<version>-linux-x64.deb`. |
+
+Tagged builds such as `v1.0.0` are published to Releases automatically. The
+latest untagged packages can also be downloaded from a successful
+[Native installers workflow run](https://github.com/rokon12/virtual-thread-simulation/actions/workflows/native-installers.yml).
+
+Packages are unsigned by default, so macOS or Windows can display a publisher
+warning for development builds. The macOS packaging scripts support Developer
+ID signing and Apple notarization as described below.
+
+## Run from source
 
 Requirements: JDK 25 and Maven 3.9+.
 
@@ -193,7 +215,7 @@ The suite also exercises randomized state invariants, immutable bounded replay
 history and markers, deterministic event vocabulary, the real virtual-thread
 bridge, settings parsing, and a scale performance budget.
 
-## Native installers
+## Build native installers
 
 JDK 25's `jpackage` creates a self-contained installer with its own Java
 runtime. Build on the target operating system:
@@ -206,16 +228,19 @@ runtime. Build on the target operating system:
 
 Results are written under `target/dist` with predictable names such as
 `Virtual-Thread-Machine-1.0.0-macos-arm64.dmg`. Override the version with
-`VT_MACHINE_VERSION=1.1.0`. Use `mvn clean package -Pnative-image` when you
-only need the unpackaged application image.
+`VT_MACHINE_VERSION=1.1.0` on macOS/Linux or
+`$env:VT_MACHINE_VERSION="1.1.0"` in PowerShell. Use
+`mvn clean package -Pnative-image` when you only need the unpackaged
+application image.
 
 The display name remains **Virtual Thread Machine**, while each platform uses
 an installer-safe identity: `ca.bazlur.virtualthreadmachine` on macOS,
 `virtual-thread-machine` on Linux, and a stable upgrade UUID on Windows.
 
-The **Native installers** GitHub Actions workflow builds all three packages on
-their native runners. Run it manually to download workflow artifacts, or push a
-tag such as `v1.0.0` to create a GitHub release with the installers attached.
+The [Native installers workflow](https://github.com/rokon12/virtual-thread-simulation/actions/workflows/native-installers.yml)
+builds all three packages on their native runners. Run it manually to download
+workflow artifacts, or push a tag such as `v1.0.0` to create a GitHub release
+with the installers attached.
 
 On macOS, set `VT_MACHINE_SIGN_IDENTITY` before packaging to codesign with the
 hardened runtime. After configuring an `xcrun notarytool` keychain profile, set
